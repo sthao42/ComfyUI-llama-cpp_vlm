@@ -39,9 +39,9 @@ except:
     
 try:
     from llama_cpp.llama_chat_format import Gemma4ChatHandler
-    chat_handlers += ["Gemma4"]
+    chat_handlers += ["Gemma4", "Gemma4-Thinking"]
 except:
-    Gemma3ChatHandler = None
+    Gemma4ChatHandler = None
 
 try:
     from llama_cpp.llama_chat_format import Qwen25VLChatHandler
@@ -151,7 +151,7 @@ class LLAMA_CPP_STORAGE:
                     return MiniCPMv26ChatHandler
                 case "Gemma3":
                     return Gemma3ChatHandler
-                case "Gemma4":
+                case "Gemma4"|"Gemma4-Thinking":
                     return Gemma4ChatHandler
                 case "GLM-4.6V"|"GLM-4.6V-Thinking":
                     return GLM46VChatHandler
@@ -177,7 +177,18 @@ class LLAMA_CPP_STORAGE:
         vram_limit = config["vram_limit"]
         image_max_tokens = config["image_max_tokens"]
         image_min_tokens = config["image_min_tokens"]
+        n_batch = config.get("n_batch", 2048)
+        n_ubatch = config.get("n_ubatch", 512)
         n_gpu_layers = -1
+
+        # Auto-adjust n_ubatch and n_batch for Gemma models to avoid llama.cpp asserts on non-causal attention
+        if chat_handler in ["Gemma3", "Gemma4", "Gemma4-Thinking"] or "gemma" in model.lower():
+            min_ubatch = min(2048, n_ctx)
+            if n_ubatch < min_ubatch:
+                print(f"[llama-cpp_vlm] Gemma model detected. Auto-adjusting n_ubatch from {n_ubatch} to {min_ubatch} to support non-causal attention.")
+                n_ubatch = min_ubatch
+            if n_batch < n_ubatch:
+                n_batch = n_ubatch
         
         model_path = os.path.join(folder_paths.models_dir, 'LLM', model)
         handler = get_chat_handler(chat_handler)
@@ -204,7 +215,7 @@ class LLAMA_CPP_STORAGE:
                 kwargs["force_reasoning"] = think_mode
                 kwargs["image_max_tokens"] = image_max_tokens
                 kwargs["image_min_tokens"] = image_min_tokens
-            elif chat_handler in ["MiniCPM-v4.5", "GLM-4.6V", "Qwen3.5"]:
+            elif any(name in chat_handler for name in ["MiniCPM-v4.5", "GLM-4.6V", "GLM-4.1V", "Qwen3.5", "Gemma4"]):
                 kwargs["enable_thinking"] = think_mode
 
             if _MTMD:
@@ -226,7 +237,15 @@ class LLAMA_CPP_STORAGE:
         
         print(f"[llama-cpp_vlm] Loading model: {model}")
         print(f"[llama-cpp_vlm] n_gpu_layers = {n_gpu_layers}")
-        cls.llm = Llama(model_path, chat_handler=cls.chat_handler, n_gpu_layers=n_gpu_layers, n_ctx=n_ctx, verbose=False)
+        cls.llm = Llama(
+            model_path,
+            chat_handler=cls.chat_handler,
+            n_gpu_layers=n_gpu_layers,
+            n_ctx=n_ctx,
+            n_batch=n_batch,
+            n_ubatch=n_ubatch,
+            verbose=False
+        )
 
 any_type = AnyType("*")
 
@@ -352,6 +371,16 @@ class llama_cpp_model_loader:
             }),
             "image_min_tokens": ("INT", {"default": 0, "min": 0, "max": 4096, "step": 32}),
             "image_max_tokens": ("INT", {"default": 0, "min": 0, "max": 4096, "step": 32}),
+            "n_batch": ("INT", {
+                "default": 2048,
+                "min": 128, "max": 327680, "step": 64,
+                "tooltip": "Logical batch size for processing prompt tokens."
+            }),
+            "n_ubatch": ("INT", {
+                "default": 512,
+                "min": 128, "max": 327680, "step": 64,
+                "tooltip": "Physical micro-batch size. Must be >= prompt/image tokens for non-causal attention models like Gemma."
+            }),
             }
         }
 
@@ -378,15 +407,17 @@ class llama_cpp_model_loader:
         config_str = json.dumps(custom_config, sort_keys=True, ensure_ascii=False)
         return config_str
     '''
-    def loadmodel(self, model, mmproj, chat_handler, n_ctx, vram_limit, image_min_tokens, image_max_tokens):
+    def loadmodel(self, model, mmproj, chat_handler, n_ctx, vram_limit, image_min_tokens, image_max_tokens, n_batch=2048, n_ubatch=512):
         custom_config = {
             "model": model,
             "mmproj": mmproj,
-            "chat_handler":chat_handler,
+            "chat_handler": chat_handler,
             "n_ctx": n_ctx,
             "vram_limit": vram_limit,
             "image_min_tokens": image_min_tokens,
-            "image_max_tokens": image_max_tokens
+            "image_max_tokens": image_max_tokens,
+            "n_batch": n_batch,
+            "n_ubatch": n_ubatch
         }
         if not LLAMA_CPP_STORAGE.llm or LLAMA_CPP_STORAGE.current_config != custom_config:
             print("[llama-cpp_vlm] Loading model...")
