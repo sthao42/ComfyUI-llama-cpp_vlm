@@ -179,6 +179,7 @@ class LLAMA_CPP_STORAGE:
         image_min_tokens = config["image_min_tokens"]
         n_batch = config.get("n_batch", 2048)
         n_ubatch = config.get("n_ubatch", 512)
+        enable_mtp = config.get("enable_mtp", False)
         n_gpu_layers = -1
 
         # Auto-adjust n_ubatch and n_batch for Gemma models to avoid llama.cpp asserts on non-causal attention
@@ -237,15 +238,25 @@ class LLAMA_CPP_STORAGE:
         
         print(f"[llama-cpp_vlm] Loading model: {model}")
         print(f"[llama-cpp_vlm] n_gpu_layers = {n_gpu_layers}")
-        cls.llm = Llama(
-            model_path,
-            chat_handler=cls.chat_handler,
-            n_gpu_layers=n_gpu_layers,
-            n_ctx=n_ctx,
-            n_batch=n_batch,
-            n_ubatch=n_ubatch,
-            verbose=False
-        )
+        import inspect
+        llama_init_params = inspect.signature(Llama.__init__).parameters
+        
+        llama_kwargs = {
+            "model_path": model_path,
+            "chat_handler": cls.chat_handler,
+            "n_gpu_layers": n_gpu_layers,
+            "n_ctx": n_ctx,
+            "n_batch": n_batch,
+            "n_ubatch": n_ubatch,
+            "verbose": False
+        }
+        
+        if "ctx_type" in llama_init_params:
+            llama_kwargs["ctx_type"] = 1 if enable_mtp else 0
+        elif enable_mtp:
+            print("[llama-cpp_vlm] Warning: MTP (ctx_type) is enabled in node settings, but your llama-cpp-python version does not support it. Ignoring.")
+            
+        cls.llm = Llama(**llama_kwargs)
 
 any_type = AnyType("*")
 
@@ -381,6 +392,10 @@ class llama_cpp_model_loader:
                 "min": 128, "max": 327680, "step": 64,
                 "tooltip": "Physical micro-batch size. Must be >= prompt/image tokens for non-causal attention models like Gemma."
             }),
+            "enable_mtp": ("BOOLEAN", {
+                "default": False,
+                "tooltip": "Enable Multi-Token Prediction (MTP) speculative decoding for compatible models (e.g. Qwen 3.6 MTP)."
+            }),
             }
         }
 
@@ -407,7 +422,7 @@ class llama_cpp_model_loader:
         config_str = json.dumps(custom_config, sort_keys=True, ensure_ascii=False)
         return config_str
     '''
-    def loadmodel(self, model, mmproj, chat_handler, n_ctx, vram_limit, image_min_tokens, image_max_tokens, n_batch=2048, n_ubatch=512):
+    def loadmodel(self, model, mmproj, chat_handler, n_ctx, vram_limit, image_min_tokens, image_max_tokens, n_batch=2048, n_ubatch=512, enable_mtp=False):
         custom_config = {
             "model": model,
             "mmproj": mmproj,
@@ -417,7 +432,8 @@ class llama_cpp_model_loader:
             "image_min_tokens": image_min_tokens,
             "image_max_tokens": image_max_tokens,
             "n_batch": n_batch,
-            "n_ubatch": n_ubatch
+            "n_ubatch": n_ubatch,
+            "enable_mtp": enable_mtp
         }
         if not LLAMA_CPP_STORAGE.llm or LLAMA_CPP_STORAGE.current_config != custom_config:
             print("[llama-cpp_vlm] Loading model...")
