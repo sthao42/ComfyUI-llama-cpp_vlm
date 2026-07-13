@@ -210,8 +210,14 @@ class LLAMA_CPP_STORAGE:
             
             print(f"[llama-cpp_vlm] Loading clip:  {mmproj}")
             
+            import inspect
+            handler_params = inspect.signature(handler.__init__).parameters
             think_mode = "Thinking" in chat_handler
-            kwargs = {"clip_model_path": mmproj_path, "verbose": False}
+            kwargs = {"verbose": False}
+            if "mmproj_path" in handler_params:
+                kwargs["mmproj_path"] = mmproj_path
+            else:
+                kwargs["clip_model_path"] = mmproj_path
             if chat_handler in ["Qwen3-VL", "Qwen3-VL-Thinking"]:
                 kwargs["force_reasoning"] = think_mode
                 kwargs["image_max_tokens"] = image_max_tokens
@@ -562,7 +568,9 @@ class llama_cpp_instruct_adv:
             user_content.append({"type": "text", "text": p})
             
         if images is not None:
-            if not hasattr(LLAMA_CPP_STORAGE.chat_handler, "clip_model_path") or LLAMA_CPP_STORAGE.chat_handler.clip_model_path is None:
+            h = LLAMA_CPP_STORAGE.chat_handler
+            h_path = getattr(h, "mmproj_path", getattr(h, "clip_model_path", None)) if h is not None else None
+            if h_path is None:
                  raise ValueError("Image input detected, but the loaded model is not configured with a mmproj module.")
                 
             frames = images
