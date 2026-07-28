@@ -257,11 +257,14 @@ class LLAMA_CPP_STORAGE:
             "verbose": False
         }
         
-        if "ctx_type" in llama_init_params:
-            llama_kwargs["ctx_type"] = 1 if enable_mtp else 0
-        elif enable_mtp:
-            print("[llama-cpp_vlm] Warning: MTP (ctx_type) is enabled in node settings, but your llama-cpp-python version does not support it. Ignoring.")
-            
+        if enable_mtp:
+            try:
+                from llama_cpp.llama_speculative import LlamaNGramMapDecoding
+                llama_kwargs["draft_model"] = LlamaNGramMapDecoding()
+                print("[llama-cpp_vlm] Multi-Token Prediction (MTP / Speculative Decoding) enabled using LlamaNGramMapDecoding.")
+            except Exception as e:
+                print(f"[llama-cpp_vlm] Warning: MTP (draft_model) failed to initialize: {e}")
+
         cls.llm = Llama(**llama_kwargs)
 
 any_type = AnyType("*")
@@ -400,7 +403,7 @@ class llama_cpp_model_loader:
             }),
             "enable_mtp": ("BOOLEAN", {
                 "default": False,
-                "tooltip": "Enable Multi-Token Prediction (MTP) speculative decoding for compatible models (e.g. Qwen 3.6 MTP)."
+                "tooltip": "Enable Multi-Token Prediction (MTP / Speculative Decoding) using LlamaNGramMapDecoding to accelerate token generation."
             }),
             }
         }
