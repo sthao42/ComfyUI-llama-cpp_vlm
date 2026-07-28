@@ -263,7 +263,7 @@ class LLAMA_CPP_STORAGE:
                 kwargs["force_reasoning"] = think_mode
                 kwargs["image_max_tokens"] = image_max_tokens
                 kwargs["image_min_tokens"] = image_min_tokens
-            elif any(name in chat_handler for name in ["MiniCPM-v4.5", "GLM-4.6V", "GLM-4.1V", "Qwen3.5", "Qwen3.6", "Gemma4"]):
+            elif any(name in chat_handler for name in ["MiniCPM-v4.5", "MiniCPM-v4.6", "GLM-4.6V", "GLM-4.1V", "Qwen3.5", "Qwen3.6", "Gemma4"]):
                 kwargs["enable_thinking"] = think_mode
 
             if _MTMD:
