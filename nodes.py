@@ -224,11 +224,11 @@ class LLAMA_CPP_STORAGE:
         enable_mtp = config.get("enable_mtp", False)
         n_gpu_layers = -1
 
-        # Auto-adjust n_ubatch and n_batch for Gemma models to avoid llama.cpp asserts on non-causal attention
-        if chat_handler in ["Gemma3", "Gemma4", "Gemma4-Thinking"] or "gemma" in model.lower():
+        # Auto-adjust n_ubatch and n_batch for multimodal models (Qwen, Gemma, GLM, MiniCPM, LFM) to ensure image token chunks (up to 2048 tokens) fit in physical micro-batches.
+        if (mmproj and mmproj != "None") or chat_handler != "None" or "gemma" in model.lower() or "qwen" in model.lower():
             min_ubatch = min(2048, n_ctx)
             if n_ubatch < min_ubatch:
-                print(f"[llama-cpp_vlm] Gemma model detected. Auto-adjusting n_ubatch from {n_ubatch} to {min_ubatch} to support non-causal attention.")
+                print(f"[llama-cpp_vlm] Multimodal handler ({chat_handler}) active. Auto-adjusting n_ubatch from {n_ubatch} to {min_ubatch} for image token evaluation.")
                 n_ubatch = min_ubatch
             if n_batch < n_ubatch:
                 n_batch = n_ubatch
@@ -493,7 +493,7 @@ class llama_cpp_model_loader:
             "mmproj": (mmproj_list, {"default": "None"}),
             "chat_handler": (chat_handlers, {"default": "None"}),
             "n_ctx": ("INT", {
-                "default": 8192,
+                "default": 16384,
                 "min": 1024, "max": 327680, "step": 128,
                 "tooltip": "Context length limit."
             }),
@@ -728,8 +728,18 @@ class llama_cpp_instruct_adv:
                         {"type": "text", "text": prompt_text},
                         {"type": "image_url", "image_url": {"url": f"data:image/jpeg;base64,{data}"}}
                     ]
-                    frame_messages = messages + [{"role": "user", "content": frame_user_content}]
-                    output = LLAMA_CPP_STORAGE.llm.create_chat_completion(messages=frame_messages, seed=seed, **final_params)
+                    try:
+                        output = LLAMA_CPP_STORAGE.llm.create_chat_completion(messages=frame_messages, seed=seed, **final_params)
+                    except Exception as e:
+                        err_str = str(e)
+                        if "context limit" in err_str.lower() or "eval_chunk_single" in err_str.lower() or "failed to find a memory slot" in err_str.lower() or "error code 1" in err_str.lower():
+                            raise RuntimeError(
+                                f"Multimodal Context Limit Exceeded ({e}).\n\n"
+                                f"Your prompt and image generated more tokens than n_ctx={LLAMA_CPP_STORAGE.current_config.get('n_ctx', 8192)}.\n"
+                                f"Qwen3.6 / Qwen3.5 and M-RoPE models do not support context shifting in llama.cpp.\n"
+                                f"👉 Solution: Please increase 'n_ctx' in the Llama-cpp Model Loader node (e.g. from {LLAMA_CPP_STORAGE.current_config.get('n_ctx', 8192)} to 16384 or 32768)."
+                            ) from e
+                        raise e
                     content = output['choices'][0]['message'].get('content', '') or ''
                     text = content.removeprefix(": ").lstrip()
                     out2.append(text)
@@ -782,14 +792,36 @@ class llama_cpp_instruct_adv:
                         user_content.append({"type": "image_url", "image_url": {"url": b64_url}})
 
                 messages.append({"role": "user", "content": user_content})
-                output = LLAMA_CPP_STORAGE.llm.create_chat_completion(messages=messages, seed=seed, **final_params)
+                try:
+                    output = LLAMA_CPP_STORAGE.llm.create_chat_completion(messages=messages, seed=seed, **final_params)
+                except Exception as e:
+                    err_str = str(e)
+                    if "context limit" in err_str.lower() or "eval_chunk_single" in err_str.lower() or "failed to find a memory slot" in err_str.lower() or "error code 1" in err_str.lower():
+                        raise RuntimeError(
+                            f"Multimodal Context Limit Exceeded ({e}).\n\n"
+                            f"Your prompt and images generated more tokens than n_ctx={LLAMA_CPP_STORAGE.current_config.get('n_ctx', 8192)}.\n"
+                            f"Qwen3.6 / Qwen3.5 and M-RoPE models do not support context shifting in llama.cpp.\n"
+                            f"👉 Solution: Please increase 'n_ctx' in the Llama-cpp Model Loader node (e.g. from {LLAMA_CPP_STORAGE.current_config.get('n_ctx', 8192)} to 16384 or 32768)."
+                        ) from e
+                    raise e
                 content = output['choices'][0]['message'].get('content', '') or ''
                 out1 = content.removeprefix(": ").lstrip()
                 out2 = [out1]
         else:
             user_content.append({"type": "text", "text": prompt_text})
             messages.append({"role": "user", "content": user_content})
-            output = LLAMA_CPP_STORAGE.llm.create_chat_completion(messages=messages, seed=seed, **final_params)
+            try:
+                output = LLAMA_CPP_STORAGE.llm.create_chat_completion(messages=messages, seed=seed, **final_params)
+            except Exception as e:
+                err_str = str(e)
+                if "context limit" in err_str.lower() or "eval_chunk_single" in err_str.lower() or "failed to find a memory slot" in err_str.lower() or "error code 1" in err_str.lower():
+                    raise RuntimeError(
+                        f"Multimodal Context Limit Exceeded ({e}).\n\n"
+                        f"Your prompt and images generated more tokens than n_ctx={LLAMA_CPP_STORAGE.current_config.get('n_ctx', 8192)}.\n"
+                        f"Qwen3.6 / Qwen3.5 and M-RoPE models do not support context shifting in llama.cpp.\n"
+                        f"👉 Solution: Please increase 'n_ctx' in the Llama-cpp Model Loader node (e.g. from {LLAMA_CPP_STORAGE.current_config.get('n_ctx', 8192)} to 16384 or 32768)."
+                    ) from e
+                raise e
             content = output['choices'][0]['message'].get('content', '') or ''
             out1 = content.removeprefix(": ").lstrip()
             out2 = [out1]
