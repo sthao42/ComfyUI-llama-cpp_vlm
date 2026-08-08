@@ -44,11 +44,9 @@ class TestComfyUILlamaCppVLM(unittest.TestCase):
     def test_instruct_adv_optional_inputs(self):
         inputs = nodes.llama_cpp_instruct_adv.INPUT_TYPES()
         optional_keys = list(inputs['optional'].keys())
-        self.assertIn('image_0', optional_keys)
-        self.assertIn('video_0', optional_keys)
-        self.assertNotIn('image_1', optional_keys, "image_1 should not be static; it must expand dynamically in JS")
-        self.assertNotIn('video_1', optional_keys, "video_1 should not be static; it must expand dynamically in JS")
-        self.assertNotIn('images', optional_keys, "images should be removed in favor of image_0")
+        for i in range(8):
+            self.assertIn(f'image_{i}', optional_keys)
+            self.assertIn(f'video_{i}', optional_keys)
 
     def test_scale_image_safety(self):
         # Test 4D tensor [1, 256, 256, 3]
