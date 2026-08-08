@@ -544,12 +544,12 @@ class llama_cpp_instruct_adv:
             "optional": {
                 "parameters": ("LLAMACPPARAMS",),
                 "images": ("IMAGE",),
-                "image_1": ("IMAGE",),
+                "image_0": ("IMAGE",),
                 "queue_handler": (any_type, {"tooltip": "Used to control the execution order of instruct nodes."}),
             },
             
         }
-    
+
     RETURN_TYPES = ("STRING", "STRING", "INT")
     RETURN_NAMES = ("output", "output_list", "state_uid")
     OUTPUT_IS_LIST = (False, True, False)
@@ -613,7 +613,7 @@ class llama_cpp_instruct_adv:
         else:
             prompt_text = preset_prompts[preset_prompt].replace("#", custom_prompt.strip()).replace("@", "video" if video_input else "image")
             
-        # Collect all image inputs from images batch and image_1..image_8
+        # Collect all image inputs from images batch and image_0..image_8
         all_images = []
         if images is not None:
             if isinstance(images, list):
@@ -624,7 +624,7 @@ class llama_cpp_instruct_adv:
             else:
                 all_images.append(images)
                 
-        for idx in range(1, 9):
+        for idx in range(0, 9):
             img_val = kwargs.get(f"image_{idx}", None)
             if img_val is not None:
                 if isinstance(img_val, list):
@@ -636,8 +636,9 @@ class llama_cpp_instruct_adv:
                     all_images.append(img_val)
 
         import re
-        pattern = re.compile(r'(?:<|\[)(?:Picture|image|img)\s*([1-9]\d*)(?:>|\])', re.IGNORECASE)
+        pattern = re.compile(r'(?:<|\[)(?:Picture|image|img)\s*([0-9]\d*)(?:>|\])', re.IGNORECASE)
         placeholders = list(pattern.finditer(prompt_text))
+        has_zero = any(int(m.group(1)) == 0 for m in placeholders)
 
         if len(all_images) > 0:
             h = LLAMA_CPP_STORAGE.chat_handler
@@ -694,14 +695,15 @@ class llama_cpp_instruct_adv:
                     last_idx = 0
                     for match in placeholders:
                         start, end = match.span()
-                        img_num = int(match.group(1)) - 1
+                        num = int(match.group(1))
+                        img_num = num if has_zero else num
                         
                         text_chunk = prompt_text[last_idx:start]
                         if text_chunk:
                             user_content.append({"type": "text", "text": text_chunk})
                         
                         if 0 <= img_num < len(base64_frames):
-                            user_content.append({"type": "text", "text": f"\n<Picture {img_num + 1}>:\n"})
+                            user_content.append({"type": "text", "text": f"\n<Picture {num}>:\n"})
                             user_content.append({"type": "image_url", "image_url": {"url": base64_frames[img_num]}})
                         else:
                             user_content.append({"type": "text", "text": match.group(0)})
@@ -714,7 +716,7 @@ class llama_cpp_instruct_adv:
                     user_content.append({"type": "text", "text": prompt_text})
                     for idx, b64_url in enumerate(base64_frames):
                         if len(base64_frames) > 1:
-                            user_content.append({"type": "text", "text": f"\n<Picture {idx + 1}>:\n"})
+                            user_content.append({"type": "text", "text": f"\n<Picture {idx}>:\n"})
                         user_content.append({"type": "image_url", "image_url": {"url": b64_url}})
 
                 messages.append({"role": "user", "content": user_content})

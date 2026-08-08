@@ -12,7 +12,7 @@ app.registerExtension({
                 const updateImageInputs = () => {
                     if (!this.inputs) return;
                     
-                    let maxConnectedNum = 0;
+                    let maxConnectedNum = -1;
                     for (const input of this.inputs) {
                         if (input.name && input.name.startsWith("image_")) {
                             const num = parseInt(input.name.replace("image_", ""), 10);
@@ -24,10 +24,10 @@ app.registerExtension({
                         }
                     }
                     
-                    const targetMax = Math.min(MAX_IMAGES, Math.max(1, maxConnectedNum + 1));
+                    const targetMax = Math.min(MAX_IMAGES, Math.max(0, maxConnectedNum + 1));
                     
-                    // Add missing sockets up to targetMax
-                    for (let i = 1; i <= targetMax; i++) {
+                    // Add missing sockets up to targetMax (image_0 .. image_targetMax)
+                    for (let i = 0; i <= targetMax; i++) {
                         const inputName = `image_${i}`;
                         const existing = this.inputs.find(inp => inp && inp.name === inputName);
                         if (!existing) {
