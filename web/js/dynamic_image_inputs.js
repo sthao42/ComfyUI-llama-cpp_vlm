@@ -1,99 +1,141 @@
 import { app } from "../../scripts/app.js";
 
-console.log("[llama-cpp_vlm] Dynamic image inputs JS extension registered!");
+const TARGET_CLASSES = new Set([
+    "llama_cpp_instruct_adv",
+    "Llama-cpp Instruct"
+]);
+
+const IMAGE_INPUT_PREFIX = "image_";
+const IMAGE_INPUT_TYPE = "IMAGE";
+const MAX_IMAGES = 8;
+
+function isTargetNode(nodeOrData) {
+    const className = nodeOrData?.comfyClass || nodeOrData?.type || nodeOrData?.name;
+    return TARGET_CLASSES.has(className);
+}
+
+function isDynamicImageInput(input) {
+    return Boolean(input?.name && String(input.name).startsWith(IMAGE_INPUT_PREFIX));
+}
+
+function getDynamicImageInputs(node) {
+    return (node.inputs || []).filter(isDynamicImageInput);
+}
+
+function renumberDynamicImageInputs(node) {
+    let nextIndex = 0;
+    for (const input of node.inputs || []) {
+        if (!isDynamicImageInput(input)) {
+            continue;
+        }
+        input.name = `${IMAGE_INPUT_PREFIX}${nextIndex}`;
+        input.label = input.name;
+        nextIndex += 1;
+    }
+}
+
+function ensureTrailingDynamicImageInput(node) {
+    const imageInputs = getDynamicImageInputs(node);
+    if (imageInputs.length >= MAX_IMAGES) {
+        return;
+    }
+    
+    if (!imageInputs.length || imageInputs[imageInputs.length - 1].link != null) {
+        const newIndex = imageInputs.length;
+        const inputName = `${IMAGE_INPUT_PREFIX}${newIndex}`;
+        
+        // Find queue_handler index to insert above queue_handler
+        const queueIdx = (node.inputs || []).findIndex(inp => inp && inp.name === "queue_handler");
+        if (queueIdx !== -1) {
+            node.addInput(inputName, IMAGE_INPUT_TYPE);
+            const newInput = node.inputs.pop();
+            node.inputs.splice(queueIdx, 0, newInput);
+        } else {
+            node.addInput(inputName, IMAGE_INPUT_TYPE);
+        }
+    }
+}
+
+function syncDynamicImageInputs(node) {
+    if (!node || node.__syncingImageInputs) {
+        return;
+    }
+
+    node.__syncingImageInputs = true;
+    try {
+        // Remove unconnected dynamic inputs except during node configuration
+        if (!node._configuring) {
+            for (let index = (node.inputs || []).length - 1; index >= 0; index -= 1) {
+                const input = node.inputs[index];
+                if (isDynamicImageInput(input) && input.link == null) {
+                    node.removeInput(index);
+                }
+            }
+        }
+
+        renumberDynamicImageInputs(node);
+        ensureTrailingDynamicImageInput(node);
+        renumberDynamicImageInputs(node);
+
+        if (typeof node.computeSize === "function" && typeof node.setSize === "function") {
+            const computed = node.computeSize();
+            const currentSize = Array.isArray(node.size) ? node.size : null;
+            if (!currentSize) {
+                node.setSize(computed);
+            } else {
+                const nextWidth = Math.max(currentSize[0] || 0, computed[0] || 0);
+                const nextHeight = Math.max(currentSize[1] || 0, computed[1] || 0);
+                if (nextWidth !== currentSize[0] || nextHeight !== currentSize[1]) {
+                    node.setSize([nextWidth, nextHeight]);
+                }
+            }
+        }
+        app.graph?.setDirtyCanvas(true, true);
+    } finally {
+        node.__syncingImageInputs = false;
+    }
+}
 
 app.registerExtension({
     name: "ComfyUI-llama-cpp_vlm.DynamicImageInputs",
-    async nodeCreated(node, app) {
-        if (!node) return;
-        const className = node.comfyClass || node.type;
-        if (className === "llama_cpp_instruct_adv" || className === "Llama-cpp Instruct") {
-            console.log("[llama-cpp_vlm] Initialized dynamic image inputs for Llama-cpp Instruct node:", node.id);
-            const MAX_IMAGES_INDEX = 7; // Total 8 sockets: image_0 to image_7
+    async beforeRegisterNodeDef(nodeType, nodeData) {
+        if (!isTargetNode(nodeData)) {
+            return;
+        }
 
-            const updateImageInputs = (changedSlot, isConnectedEvent) => {
-                if (!node.inputs || node._configuring) return;
+        const onNodeCreated = nodeType.prototype.onNodeCreated;
+        nodeType.prototype.onNodeCreated = function() {
+            const result = onNodeCreated ? onNodeCreated.apply(this, arguments) : undefined;
+            setTimeout(() => {
+                syncDynamicImageInputs(this);
+            }, 50);
+            return result;
+        };
 
-                let maxConnectedNum = -1;
-                for (let idx = 0; idx < node.inputs.length; idx++) {
-                    const input = node.inputs[idx];
-                    if (input && input.name && input.name.startsWith("image_")) {
-                        const num = parseInt(input.name.replace("image_", ""), 10);
-                        if (!isNaN(num)) {
-                            let isConnected = false;
-                            if (idx === changedSlot && isConnectedEvent !== undefined) {
-                                isConnected = isConnectedEvent;
-                            } else if (input.link != null) {
-                                const linkObj = app.graph ? (app.graph.links ? app.graph.links[input.link] : null) : null;
-                                isConnected = linkObj != null;
-                            }
+        const onConnectionsChange = nodeType.prototype.onConnectionsChange;
+        nodeType.prototype.onConnectionsChange = function(type, index, connected, linkInfo) {
+            const result = onConnectionsChange ? onConnectionsChange.apply(this, arguments) : undefined;
+            const input = this.inputs?.[index];
+            if (type === 2 && !isDynamicImageInput(input)) {
+                return result;
+            }
 
-                            if (isConnected && num > maxConnectedNum) {
-                                maxConnectedNum = num;
-                            }
-                        }
-                    }
-                }
+            setTimeout(() => syncDynamicImageInputs(this), 0);
+            return result;
+        };
 
-                const targetMax = Math.min(MAX_IMAGES_INDEX, Math.max(0, maxConnectedNum + 1));
-
-                // Add missing sockets up to targetMax (image_0 .. image_targetMax)
-                for (let i = 0; i <= targetMax; i++) {
-                    const inputName = `image_${i}`;
-                    const existing = node.inputs.find(inp => inp && inp.name === inputName);
-                    if (!existing) {
-                        const queueIdx = node.inputs.findIndex(inp => inp && inp.name === "queue_handler");
-                        if (queueIdx !== -1) {
-                            node.addInput(inputName, "IMAGE");
-                            const newInput = node.inputs.pop();
-                            node.inputs.splice(queueIdx, 0, newInput);
-                        } else {
-                            node.addInput(inputName, "IMAGE");
-                        }
-                        console.log(`[llama-cpp_vlm] Added socket ${inputName} to node ${node.id}`);
-                    }
-                }
-
-                // Remove unlinked trailing inputs greater than targetMax
-                for (let i = node.inputs.length - 1; i >= 0; i--) {
-                    const input = node.inputs[i];
-                    if (input && input.name && input.name.startsWith("image_")) {
-                        const num = parseInt(input.name.replace("image_", ""), 10);
-                        if (!isNaN(num) && num > targetMax) {
-                            const isConnected = input.link != null && (app.graph?.links ? app.graph.links[input.link] != null : true);
-                            if (!isConnected) {
-                                node.removeInput(i);
-                                console.log(`[llama-cpp_vlm] Removed unlinked socket ${input.name} from node ${node.id}`);
-                            }
-                        }
-                    }
-                }
-
-                app.graph?.setDirtyCanvas(true, true);
-            };
-
-            const origOnConnectionsChange = node.onConnectionsChange;
-            node.onConnectionsChange = function (type, index, connected, link_info, input_info) {
-                if (origOnConnectionsChange) {
-                    origOnConnectionsChange.apply(this, arguments);
-                }
-                if (type === 1) { // 1 = LiteGraph.INPUT
-                    updateImageInputs(index, connected);
-                    setTimeout(() => updateImageInputs(), 20);
-                }
-            };
-
-            const origOnConfigure = node.onConfigure;
-            node.onConfigure = function () {
-                node._configuring = true;
-                if (origOnConfigure) {
-                    origOnConfigure.apply(this, arguments);
-                }
-                node._configuring = false;
-                setTimeout(() => updateImageInputs(), 50);
-            };
-
-            setTimeout(() => updateImageInputs(), 50);
+        const onConfigure = nodeType.prototype.onConfigure;
+        nodeType.prototype.onConfigure = function() {
+            this._configuring = true;
+            const result = onConfigure ? onConfigure.apply(this, arguments) : undefined;
+            this._configuring = false;
+            setTimeout(() => syncDynamicImageInputs(this), 50);
+            return result;
+        };
+    },
+    async nodeCreated(node) {
+        if (isTargetNode(node)) {
+            setTimeout(() => syncDynamicImageInputs(node), 50);
         }
     }
 });
