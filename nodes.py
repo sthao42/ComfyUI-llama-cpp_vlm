@@ -298,6 +298,10 @@ class LLAMA_CPP_STORAGE:
             "verbose": False
         }
         
+        flash_attn = config.get("flash_attn", True)
+        if "flash_attn" in llama_init_params:
+            llama_kwargs["flash_attn"] = flash_attn
+            
         if enable_mtp:
             try:
                 from llama_cpp.llama_speculative import LlamaNGramMapDecoding
@@ -333,6 +337,8 @@ preset_prompts = {
     "Creative - Summarize Video": "Summarize the key events and narrative points in this video.",
     "Creative - Short Story": "Write a short, imaginative story inspired by this @ or video.",
     "Creative - Refine & Expand Prompt": "Refine and enhance the following user prompt for creative text-to-@ generation. Keep the meaning and keywords, make it more expressive and visually rich. Output **only the improved prompt text itself**, without any reasoning steps, thinking process, or additional commentary.",
+    "Multi-Image - Compare & Describe": "Compare the provided images (<Picture 1>, <Picture 2>, etc.). Describe the visual differences, subjects, styles, and composition across each picture.",
+    "Multi-Image - Reference Video Prompt": "Analyze the reference images (<Picture 1>, <Picture 2>, etc.) and generate a cohesive text-to-video / text-to-image prompt detailing the progression, subject consistency, and scene dynamics across the frames.",
     "Vision - *Bounding Box": 'Locate every instance that belongs to the following categories: "#". Report bbox coordinates in {"bbox_2d": [x1, y1, x2, y2], "label": "string"} JSON format as a List.'
 }
 preset_tags = list(preset_prompts.keys())
@@ -446,6 +452,10 @@ class llama_cpp_model_loader:
                 "default": False,
                 "tooltip": "Enable Multi-Token Prediction (MTP / Speculative Decoding) using LlamaNGramMapDecoding to accelerate token generation."
             }),
+            "flash_attn": ("BOOLEAN", {
+                "default": True,
+                "tooltip": "Enable Flash Attention for memory reduction (KV cache) and faster long-context multi-image processing."
+            }),
             }
         }
 
@@ -472,7 +482,7 @@ class llama_cpp_model_loader:
         config_str = json.dumps(custom_config, sort_keys=True, ensure_ascii=False)
         return config_str
     '''
-    def loadmodel(self, model, mmproj, chat_handler, n_ctx, vram_limit, image_min_tokens, image_max_tokens, n_batch=2048, n_ubatch=512, enable_mtp=False):
+    def loadmodel(self, model, mmproj, chat_handler, n_ctx, vram_limit, image_min_tokens, image_max_tokens, n_batch=2048, n_ubatch=512, enable_mtp=False, flash_attn=True):
         custom_config = {
             "model": model,
             "mmproj": mmproj,
@@ -483,7 +493,8 @@ class llama_cpp_model_loader:
             "image_max_tokens": image_max_tokens,
             "n_batch": n_batch,
             "n_ubatch": n_ubatch,
-            "enable_mtp": enable_mtp
+            "enable_mtp": enable_mtp,
+            "flash_attn": flash_attn
         }
         if not LLAMA_CPP_STORAGE.llm or LLAMA_CPP_STORAGE.current_config != custom_config:
             print("[llama-cpp_vlm] Loading model...")
@@ -533,6 +544,14 @@ class llama_cpp_instruct_adv:
             "optional": {
                 "parameters": ("LLAMACPPARAMS",),
                 "images": ("IMAGE",),
+                "image_1": ("IMAGE",),
+                "image_2": ("IMAGE",),
+                "image_3": ("IMAGE",),
+                "image_4": ("IMAGE",),
+                "image_5": ("IMAGE",),
+                "image_6": ("IMAGE",),
+                "image_7": ("IMAGE",),
+                "image_8": ("IMAGE",),
                 "queue_handler": (any_type, {"tooltip": "Used to control the execution order of instruct nodes."}),
             },
             
@@ -554,7 +573,7 @@ class llama_cpp_instruct_adv:
                         item["image_url"]["url"] = "data:image/png;base64,iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAIAAACQd1PeAAAACXBIWXMAAAsTAAALEwEAmpwYAAAADElEQVQImWP4//8/AAX+Av5Y8msOAAAAAElFTkSuQmCC"
         return clean_messages
     
-    def process(self, llama_model, preset_prompt, custom_prompt, system_prompt, inference_mode, max_frames, max_size, seed, force_offload, save_states, unique_id, parameters=None, images=None, queue_handler=None):
+    def process(self, llama_model, preset_prompt, custom_prompt, system_prompt, inference_mode, max_frames, max_size, seed, force_offload, save_states, unique_id, parameters=None, images=None, queue_handler=None, **kwargs):
         if not LLAMA_CPP_STORAGE.llm:
             LLAMA_CPP_STORAGE.load_model(llama_model)
             #raise RuntimeError("The model has been unloaded or failed to load!")
@@ -568,6 +587,9 @@ class llama_cpp_instruct_adv:
         _uid = parameters.get("state_uid", None)
         _parameters = parameters.copy()
         _parameters.pop("state_uid", None)
+        if _parameters.get("max_tokens") in (-1, 0):
+            _parameters.pop("max_tokens", None)
+            
         uid = unique_id.rpartition('.')[-1] if _uid in (None, -1) else _uid
         
         last_sys_prompt = LLAMA_CPP_STORAGE.sys_prompts.get(f"{uid}", None)
@@ -592,22 +614,53 @@ class llama_cpp_instruct_adv:
         out1 = ""
         out2 = []
         user_content = []
+        prompt_text = ""
         if custom_prompt.strip() and "*" not in preset_prompt:
-            user_content.append({"type": "text", "text": custom_prompt})
+            prompt_text = custom_prompt.strip()
         else:
-            p = preset_prompts[preset_prompt].replace("#", custom_prompt.strip()).replace("@", "video" if video_input else "image")
-            user_content.append({"type": "text", "text": p})
+            prompt_text = preset_prompts[preset_prompt].replace("#", custom_prompt.strip()).replace("@", "video" if video_input else "image")
             
+        # Collect all image inputs from images batch and image_1..image_8
+        all_images = []
         if images is not None:
+            if isinstance(images, list):
+                all_images.extend(images)
+            elif len(images.shape) == 4:
+                for i in range(images.shape[0]):
+                    all_images.append(images[i])
+            else:
+                all_images.append(images)
+                
+        for idx in range(1, 9):
+            img_val = kwargs.get(f"image_{idx}", None)
+            if img_val is not None:
+                if isinstance(img_val, list):
+                    all_images.extend(img_val)
+                elif len(img_val.shape) == 4:
+                    for i in range(img_val.shape[0]):
+                        all_images.append(img_val[i])
+                else:
+                    all_images.append(img_val)
+
+        import re
+        pattern = re.compile(r'(?:<|\[)(?:Picture|image|img)\s*([1-9]\d*)(?:>|\])', re.IGNORECASE)
+        placeholders = list(pattern.finditer(prompt_text))
+
+        if len(all_images) > 0:
             h = LLAMA_CPP_STORAGE.chat_handler
             h_path = getattr(h, "mmproj_path", getattr(h, "clip_model_path", None)) if h is not None else None
             if h_path is None:
                  raise ValueError("Image input detected, but the loaded model is not configured with a mmproj module.")
                 
-            frames = images
-            if video_input:
-                indices = np.linspace(0, len(images) - 1, max_frames, dtype=int)
-                frames = [images[i] for i in indices]
+            n_ctx = LLAMA_CPP_STORAGE.current_config.get("n_ctx", 8192) if LLAMA_CPP_STORAGE.current_config else 8192
+            est_tokens = len(system_prompts) // 3 + len(prompt_text) // 3 + (len(all_images) * 1024)
+            if est_tokens > n_ctx * 0.9:
+                print(f"[llama-cpp_vlm] Warning: Estimated prompt + multi-image tokens ({est_tokens}) close to or exceeding n_ctx ({n_ctx}). Consider increasing n_ctx in model loader.")
+
+            frames = all_images
+            if video_input and len(all_images) > max_frames:
+                indices = np.linspace(0, len(all_images) - 1, max_frames, dtype=int)
+                frames = [all_images[i] for i in indices]
                 
             if inference_mode == "one by one":
                 tmp_list = []
@@ -617,7 +670,7 @@ class llama_cpp_instruct_adv:
                 }
                 user_content.append(image_content)
                 messages.append({"role": "user", "content": user_content})
-                print(f"[llama-cpp_vlm] Start processing {len(frames)} images")
+                print(f"[llama-cpp_vlm] Start processing {len(frames)} images one by one")
                 
                 for i, image in enumerate(cqdm(frames)):
                     if mm.processing_interrupted():
@@ -636,22 +689,47 @@ class llama_cpp_instruct_adv:
                     
                 out1 = "\n\n".join(tmp_list)
             else:
-                for image in frames:
+                base64_frames = []
+                for img in frames:
                     if len(frames) > 1:
-                        data = image2base64(scale_image(image, max_size))
+                        data = image2base64(scale_image(img, max_size))
                     else:
-                        data = image2base64(np.clip(255.0 * image.cpu().numpy().squeeze(), 0, 255).astype(np.uint8))
-                    image_content = {
-                        "type": "image_url",
-                        "image_url": {"url": f"data:image/jpeg;base64,{data}"}
-                    }
-                    user_content.append(image_content)
+                        data = image2base64(np.clip(255.0 * img.cpu().numpy().squeeze(), 0, 255).astype(np.uint8))
+                    base64_frames.append(f"data:image/jpeg;base64,{data}")
+
+                if placeholders:
+                    last_idx = 0
+                    for match in placeholders:
+                        start, end = match.span()
+                        img_num = int(match.group(1)) - 1
+                        
+                        text_chunk = prompt_text[last_idx:start]
+                        if text_chunk:
+                            user_content.append({"type": "text", "text": text_chunk})
+                        
+                        if 0 <= img_num < len(base64_frames):
+                            user_content.append({"type": "text", "text": f"\n<Picture {img_num + 1}>:\n"})
+                            user_content.append({"type": "image_url", "image_url": {"url": base64_frames[img_num]}})
+                        else:
+                            user_content.append({"type": "text", "text": match.group(0)})
+                        last_idx = end
                     
+                    remaining_text = prompt_text[last_idx:]
+                    if remaining_text:
+                        user_content.append({"type": "text", "text": remaining_text})
+                else:
+                    user_content.append({"type": "text", "text": prompt_text})
+                    for idx, b64_url in enumerate(base64_frames):
+                        if len(base64_frames) > 1:
+                            user_content.append({"type": "text", "text": f"\n<Picture {idx + 1}>:\n"})
+                        user_content.append({"type": "image_url", "image_url": {"url": b64_url}})
+
                 messages.append({"role": "user", "content": user_content})
                 output = LLAMA_CPP_STORAGE.llm.create_chat_completion(messages=messages, seed=seed, **_parameters)
                 out1 = output['choices'][0]['message']['content'].removeprefix(": ").lstrip()
                 out2 = [out1]
         else:
+            user_content.append({"type": "text", "text": prompt_text})
             messages.append({"role": "user", "content": user_content})
             output = LLAMA_CPP_STORAGE.llm.create_chat_completion(messages=messages, seed=seed, **_parameters)
             out1 = output['choices'][0]['message']['content'].removeprefix(": ").lstrip()
@@ -685,7 +763,7 @@ class llama_cpp_parameters:
     def INPUT_TYPES(s):
         return {
             "required": {
-                "max_tokens": ("INT", {"default": 1024, "min": 0, "max": 4096, "step": 1}),
+                "max_tokens": ("INT", {"default": 4096, "min": -1, "max": 327680, "step": 1, "tooltip": "Max output tokens (-1 = uncapped up to context limit)."}),
                 "top_k": ("INT", {"default": 30, "min": 0, "max": 1000, "step": 1}),
                 "top_p": ("FLOAT", {"default": 0.9, "min": 0.0, "max": 1.0, "step": 0.01}),
                 "min_p": ("FLOAT", {"default": 0.05, "min": 0.0, "max": 1.0, "step": 0.01}),
