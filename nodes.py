@@ -359,8 +359,11 @@ def parse_json(json_str):
     return parsed
 
 def scale_image(image: torch.Tensor, max_size: int = 128):
-    resized_frames = []
-    img_np = np.clip(255.0 * image.cpu().numpy().squeeze(), 0, 255).astype(np.uint8)
+    if image.ndim == 4:
+        image = image.squeeze(0)
+    img_np = np.clip(255.0 * image.cpu().numpy(), 0, 255).astype(np.uint8)
+    if img_np.ndim == 2:
+        img_np = np.stack([img_np] * 3, axis=-1)
     img_pil = Image.fromarray(img_np)
     
     w, h = img_pil.size
@@ -371,7 +374,12 @@ def scale_image(image: torch.Tensor, max_size: int = 128):
     return np.array(img_resized)
 
 def qwen3bbox(image, json):
-    img = Image.fromarray(np.clip(255.0 * image.cpu().numpy().squeeze(), 0, 255).astype(np.uint8))
+    if image.ndim == 4:
+        image = image.squeeze(0)
+    img_np = np.clip(255.0 * image.cpu().numpy(), 0, 255).astype(np.uint8)
+    if img_np.ndim == 2:
+        img_np = np.stack([img_np] * 3, axis=-1)
+    img = Image.fromarray(img_np)
     bboxes = []
     for item in json:
         x0, y0, x1, y1 = item["bbox_2d"]
@@ -385,7 +393,12 @@ def qwen3bbox(image, json):
 
 def draw_bbox(image, json, mode):
     label_colors = {}
-    img = Image.fromarray(np.clip(255.0 * image.cpu().numpy().squeeze(), 0, 255).astype(np.uint8))
+    if image.ndim == 4:
+        image = image.squeeze(0)
+    img_np = np.clip(255.0 * image.cpu().numpy(), 0, 255).astype(np.uint8)
+    if img_np.ndim == 2:
+        img_np = np.stack([img_np] * 3, axis=-1)
+    img = Image.fromarray(img_np)
     draw = ImageDraw.Draw(img)
     
     for item in json:
@@ -589,7 +602,7 @@ class llama_cpp_instruct_adv:
         system_prompts = "请将输入的图片序列当做视频而不是静态帧序列, " + system_prompt if video_input else system_prompt
         if last_sys_prompt != system_prompts:
             messages = []
-            LLAMA_CPP_STORAGE.clean_state()
+            LLAMA_CPP_STORAGE.clean_state(id=uid)
             LLAMA_CPP_STORAGE.sys_prompts[f"{uid}"] = system_prompts
             if system_prompts.strip():
                 messages.append({"role": "system", "content": system_prompts})
@@ -648,24 +661,26 @@ class llama_cpp_instruct_adv:
                 
             if inference_mode == "one by one":
                 tmp_list = []
-                image_content = {
-                    "type": "image_url",
-                    "image_url": {"url": ""}
-                }
-                user_content.append(image_content)
-                messages.append({"role": "user", "content": user_content})
                 print(f"[llama-cpp_vlm] Start processing {len(frames)} images one by one")
                 
                 for i, image in enumerate(cqdm(frames)):
                     if mm.processing_interrupted():
                         raise mm.InterruptProcessingException()
-                    data = image2base64(np.clip(255.0 * image.cpu().numpy().squeeze(), 0, 255).astype(np.uint8))
-                    for item in user_content:
-                        if item.get("type") == "image_url":
-                            item["image_url"]["url"] = f"data:image/jpeg;base64,{data}"
-                            break
-                    output = LLAMA_CPP_STORAGE.llm.create_chat_completion(messages=messages, seed=seed, **_parameters)
-                    text = output['choices'][0]['message']['content'].removeprefix(": ").lstrip()
+                    if image.ndim == 4:
+                        image = image.squeeze(0)
+                    img_np = np.clip(255.0 * image.cpu().numpy(), 0, 255).astype(np.uint8)
+                    if img_np.ndim == 2:
+                        img_np = np.stack([img_np] * 3, axis=-1)
+                    data = image2base64(img_np)
+                    
+                    frame_user_content = [
+                        {"type": "text", "text": prompt_text},
+                        {"type": "image_url", "image_url": {"url": f"data:image/jpeg;base64,{data}"}}
+                    ]
+                    frame_messages = messages + [{"role": "user", "content": frame_user_content}]
+                    output = LLAMA_CPP_STORAGE.llm.create_chat_completion(messages=frame_messages, seed=seed, **_parameters)
+                    content = output['choices'][0]['message'].get('content', '') or ''
+                    text = content.removeprefix(": ").lstrip()
                     out2.append(text)
                     if len(frames) > 1:
                         tmp_list.append(f"====== Image {i+1} ======")
@@ -678,7 +693,12 @@ class llama_cpp_instruct_adv:
                     if len(frames) > 1:
                         data = image2base64(scale_image(img, max_size))
                     else:
-                        data = image2base64(np.clip(255.0 * img.cpu().numpy().squeeze(), 0, 255).astype(np.uint8))
+                        if img.ndim == 4:
+                            img = img.squeeze(0)
+                        img_np = np.clip(255.0 * img.cpu().numpy(), 0, 255).astype(np.uint8)
+                        if img_np.ndim == 2:
+                            img_np = np.stack([img_np] * 3, axis=-1)
+                        data = image2base64(img_np)
                     base64_frames.append(f"data:image/jpeg;base64,{data}")
 
                 if placeholders:
@@ -722,6 +742,16 @@ class llama_cpp_instruct_adv:
             content = output['choices'][0]['message'].get('content', '') or ''
             out1 = content.removeprefix(": ").lstrip()
             out2 = [out1]
+
+        # Strip reasoning thinking blocks (<think>...</think>) from main out1 string
+        def strip_think_block(text: str) -> str:
+            if not text:
+                return ""
+            cleaned = re.sub(r'<think>.*?</think>', '', text, flags=re.DOTALL)
+            cleaned = re.sub(r'<think>.*$', '', cleaned, flags=re.DOTALL)
+            return cleaned.strip()
+
+        out1 = strip_think_block(out1)
             
         if save_states:
             print(f"[llama-cpp_vlm] Saving state id={uid}...")
