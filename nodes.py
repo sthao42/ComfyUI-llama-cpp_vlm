@@ -298,9 +298,25 @@ class LLAMA_CPP_STORAGE:
             "verbose": False
         }
         
-        flash_attn = config.get("flash_attn", True)
-        if "flash_attn" in llama_init_params:
-            llama_kwargs["flash_attn"] = flash_attn
+        if config.get("flash_attn", True):
+            if "flash_attn" in llama_init_params:
+                llama_kwargs["flash_attn"] = True
+            elif "flash_attn_type" in llama_init_params:
+                llama_kwargs["flash_attn_type"] = 1
+
+        if config.get("offload_kqv", True) and "offload_kqv" in llama_init_params:
+            llama_kwargs["offload_kqv"] = True
+
+        kv_cache_type = config.get("kv_cache_type", "f16")
+        if kv_cache_type != "f16":
+            if "type_k" in llama_init_params:
+                llama_kwargs["type_k"] = kv_cache_type
+            if "type_v" in llama_init_params:
+                llama_kwargs["type_v"] = kv_cache_type
+
+        n_threads = config.get("n_threads", 0)
+        if n_threads > 0 and "n_threads" in llama_init_params:
+            llama_kwargs["n_threads"] = n_threads
             
         if enable_mtp:
             try:
@@ -469,6 +485,19 @@ class llama_cpp_model_loader:
                 "default": True,
                 "tooltip": "Enable Flash Attention for memory reduction (KV cache) and faster long-context multi-image processing."
             }),
+            "offload_kqv": ("BOOLEAN", {
+                "default": True,
+                "tooltip": "Offload Key/Query/Value KV cache tensors directly to GPU VRAM for maximum inference speed."
+            }),
+            "kv_cache_type": (["f16", "q8_0", "q4_0"], {
+                "default": "f16",
+                "tooltip": "KV cache quantization type. Quantizing KV cache to q8_0 or q4_0 reduces VRAM usage for long context windows by up to 75%."
+            }),
+            "n_threads": ("INT", {
+                "default": 0,
+                "min": 0, "max": 128, "step": 1,
+                "tooltip": "CPU threads for token generation (0 = auto-detect)."
+            }),
             }
         }
 
@@ -495,7 +524,7 @@ class llama_cpp_model_loader:
         config_str = json.dumps(custom_config, sort_keys=True, ensure_ascii=False)
         return config_str
     '''
-    def loadmodel(self, model, mmproj, chat_handler, n_ctx, vram_limit, image_min_tokens, image_max_tokens, n_batch=2048, n_ubatch=512, enable_mtp=False, flash_attn=True):
+    def loadmodel(self, model, mmproj, chat_handler, n_ctx, vram_limit, image_min_tokens, image_max_tokens, n_batch=2048, n_ubatch=512, enable_mtp=False, flash_attn=True, offload_kqv=True, kv_cache_type="f16", n_threads=0):
         custom_config = {
             "model": model,
             "mmproj": mmproj,
@@ -507,7 +536,10 @@ class llama_cpp_model_loader:
             "n_batch": n_batch,
             "n_ubatch": n_ubatch,
             "enable_mtp": enable_mtp,
-            "flash_attn": flash_attn
+            "flash_attn": flash_attn,
+            "offload_kqv": offload_kqv,
+            "kv_cache_type": kv_cache_type,
+            "n_threads": n_threads
         }
         if not LLAMA_CPP_STORAGE.llm or LLAMA_CPP_STORAGE.current_config != custom_config:
             print("[llama-cpp_vlm] Loading model...")
@@ -730,15 +762,23 @@ class llama_cpp_instruct_adv:
                             user_content.append({"type": "text", "text": f"\n<Picture {tag_num}>:\n"})
                         user_content.append({"type": "image_url", "image_url": {"url": b64_url}})
 
+                import inspect
+                completion_params = inspect.signature(LLAMA_CPP_STORAGE.llm.create_chat_completion).parameters
+                final_params = {k: v for k, v in _parameters.items() if k in completion_params}
+
                 messages.append({"role": "user", "content": user_content})
-                output = LLAMA_CPP_STORAGE.llm.create_chat_completion(messages=messages, seed=seed, **_parameters)
+                output = LLAMA_CPP_STORAGE.llm.create_chat_completion(messages=messages, seed=seed, **final_params)
                 content = output['choices'][0]['message'].get('content', '') or ''
                 out1 = content.removeprefix(": ").lstrip()
                 out2 = [out1]
         else:
+            import inspect
+            completion_params = inspect.signature(LLAMA_CPP_STORAGE.llm.create_chat_completion).parameters
+            final_params = {k: v for k, v in _parameters.items() if k in completion_params}
+
             user_content.append({"type": "text", "text": prompt_text})
             messages.append({"role": "user", "content": user_content})
-            output = LLAMA_CPP_STORAGE.llm.create_chat_completion(messages=messages, seed=seed, **_parameters)
+            output = LLAMA_CPP_STORAGE.llm.create_chat_completion(messages=messages, seed=seed, **final_params)
             content = output['choices'][0]['message'].get('content', '') or ''
             out1 = content.removeprefix(": ").lstrip()
             out2 = [out1]
@@ -782,16 +822,22 @@ class llama_cpp_parameters:
         return {
             "required": {
                 "max_tokens": ("INT", {"default": 4096, "min": -1, "max": 327680, "step": 1, "tooltip": "Max output tokens (-1 = uncapped up to context limit)."}),
+                "temperature": ("FLOAT", {"default": 0.8, "min": 0.0, "max": 2.0, "step": 0.01}),
                 "top_k": ("INT", {"default": 30, "min": 0, "max": 1000, "step": 1}),
                 "top_p": ("FLOAT", {"default": 0.9, "min": 0.0, "max": 1.0, "step": 0.01}),
                 "min_p": ("FLOAT", {"default": 0.05, "min": 0.0, "max": 1.0, "step": 0.01}),
                 "typical_p": ("FLOAT", {"default": 1.0, "min": 0.0, "max": 1.0, "step": 0.01}),
-                "temperature": ("FLOAT", {"default": 0.8, "min": 0.0, "max": 2.0, "step": 0.01}),
                 "repeat_penalty": ("FLOAT", {"default": 1.0, "min": 0.0, "max": 10.0, "step": 0.01}),
                 "frequency_penalty": ("FLOAT", {"default": 0.0, "min": 0.0, "max": 1.0, "step": 0.01}),
                 "present_penalty": ("FLOAT", {"default": 0.0, "min": 0.0, "max": 2.0, "step": 0.01}),
-                #"tfs_z": ("FLOAT", {"default": 1.0, "min": 0.0, "max": 10.0, "step": 0.01}),
-                #"penalty_last_n": ("INT", {"default": 64, "min": -1, "max": 8192, "step": 1}),
+                "stop": ("STRING", {"default": "", "multiline": False, "tooltip": "Comma-separated list of stop phrases to halt generation (e.g. '###, \\n\\n')."}),
+                "dry_multiplier": ("FLOAT", {"default": 0.0, "min": 0.0, "max": 5.0, "step": 0.05, "tooltip": "DRY repetition sampler multiplier (0.0 = disabled)."}),
+                "dry_base": ("FLOAT", {"default": 1.75, "min": 1.0, "max": 5.0, "step": 0.05, "tooltip": "DRY sampler penalty base exponent."}),
+                "dry_allowed_length": ("INT", {"default": 2, "min": 0, "max": 32, "step": 1, "tooltip": "DRY sampler allowed sequence length before penalty applies."}),
+                "dynatemp_range": ("FLOAT", {"default": 0.0, "min": 0.0, "max": 2.0, "step": 0.05, "tooltip": "Dynamic temperature range (0.0 = disabled)."}),
+                "xtc_threshold": ("FLOAT", {"default": 0.0, "min": 0.0, "max": 0.5, "step": 0.01, "tooltip": "XTC sampler threshold (0.0 = disabled)."}),
+                "xtc_probability": ("FLOAT", {"default": 0.0, "min": 0.0, "max": 1.0, "step": 0.01, "tooltip": "XTC sampler probability."}),
+                "reasoning_budget": ("INT", {"default": -1, "min": -1, "max": 32768, "step": 64, "tooltip": "Token budget for thinking models like Gemma4-Thinking (-1 = no budget limit)."}),
                 "mirostat_mode": ("INT", {"default": 0, "min": 0, "max": 2, "step": 1}),
                 "mirostat_eta": ("FLOAT", {"default": 0.1, "min": 0.0, "max": 1.0, "step": 0.01}),
                 "mirostat_tau": ("FLOAT", {"default": 5.0, "min": 0.0, "max": 10.0, "step": 0.01}),
@@ -806,6 +852,27 @@ class llama_cpp_parameters:
     FUNCTION = "process"
     CATEGORY = "llama-cpp-vlm"
     def process(self, **kwargs):
+        stop_val = kwargs.get("stop", "")
+        if isinstance(stop_val, str) and stop_val.strip():
+            kwargs["stop"] = [s.strip() for s in stop_val.split(",") if s.strip()]
+        elif "stop" in kwargs:
+            kwargs.pop("stop", None)
+
+        if kwargs.get("dry_multiplier", 0.0) == 0.0:
+            kwargs.pop("dry_multiplier", None)
+            kwargs.pop("dry_base", None)
+            kwargs.pop("dry_allowed_length", None)
+
+        if kwargs.get("dynatemp_range", 0.0) == 0.0:
+            kwargs.pop("dynatemp_range", None)
+
+        if kwargs.get("xtc_threshold", 0.0) == 0.0:
+            kwargs.pop("xtc_threshold", None)
+            kwargs.pop("xtc_probability", None)
+
+        if kwargs.get("reasoning_budget", -1) in (-1, 0):
+            kwargs.pop("reasoning_budget", None)
+
         return (kwargs,)
     
 class llama_cpp_clean_states:

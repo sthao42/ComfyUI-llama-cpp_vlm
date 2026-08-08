@@ -56,15 +56,23 @@ python -m pip install -r ComfyUI-llama-cpp_vlm/requirements.txt
 * **`vram_limit`**: VRAM limit in GB (`-1` = no limit).
 * **`n_batch` / `n_ubatch`**: Logical prompt batch and physical micro-batch size.
 * **`flash_attn`**: Toggle Flash Attention for low VRAM long-context processing.
+* **`offload_kqv`**: Offload Key/Query/Value KV cache tensors directly to GPU VRAM for maximum speed.
+* **`kv_cache_type`**: Choose `"f16"`, `"q8_0"`, or `"q4_0"`. Quantizing KV cache saves up to 75% VRAM on 16k–128k context windows.
+* **`n_threads`**: CPU thread tuning for generation (`0` = auto-detect).
 * **`enable_mtp`**: Enable Multi-Token Prediction (speculative decoding).
 
 ### `llama_cpp_instruct_adv`
-* **`image_0`**: Initial image socket. Connecting an image automatically reveals `image_1`, `image_2`, etc.
+* **`image_0`**: Initial image socket. Connecting an image automatically reveals `image_1`, `image_2`, up to `image_7`.
 * **`custom_prompt`**: Input user prompt. Use `<Picture 0>`, `<Picture 1>` placeholders to position images inline.
 * **`preset_prompt`**: Select pre-configured prompts for captioning, tagging, Midjourney/Flux prompt styling, or multi-image comparison.
 
 ### `llama_cpp_parameters`
 * **`max_tokens`**: Maximum generated tokens (default: `4096`, set `-1` for uncapped generation).
+* **`stop`**: Comma-separated list of phrases to halt generation instantly (e.g. `"###, \n\n"`).
+* **`dry_multiplier` / `dry_base` / `dry_allowed_length`**: DRY (Don't Repeat Yourself) sampler to eliminate repetitive phrasing.
+* **`dynatemp_range`**: Dynamic temperature sampling range (`0.0` = disabled).
+* **`xtc_threshold` / `xtc_probability`**: Exclude Top Choices (XTC) sampler.
+* **`reasoning_budget`**: Max token budget for thinking models (`Gemma4-Thinking`, `Qwen3.6-Thinking`).
 * **`temperature`**, **`top_p`**, **`min_p`**, **`repeat_penalty`**, **`present_penalty`**.
 
 ---
