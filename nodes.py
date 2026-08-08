@@ -686,7 +686,7 @@ class llama_cpp_instruct_adv:
                     for match in placeholders:
                         start, end = match.span()
                         num = int(match.group(1))
-                        img_num = num if has_zero else num
+                        img_num = num if has_zero else num - 1
                         
                         text_chunk = prompt_text[last_idx:start]
                         if text_chunk:
@@ -706,18 +706,21 @@ class llama_cpp_instruct_adv:
                     user_content.append({"type": "text", "text": prompt_text})
                     for idx, b64_url in enumerate(base64_frames):
                         if len(base64_frames) > 1:
-                            user_content.append({"type": "text", "text": f"\n<Picture {idx}>:\n"})
+                            tag_num = idx if has_zero else idx + 1
+                            user_content.append({"type": "text", "text": f"\n<Picture {tag_num}>:\n"})
                         user_content.append({"type": "image_url", "image_url": {"url": b64_url}})
 
                 messages.append({"role": "user", "content": user_content})
                 output = LLAMA_CPP_STORAGE.llm.create_chat_completion(messages=messages, seed=seed, **_parameters)
-                out1 = output['choices'][0]['message']['content'].removeprefix(": ").lstrip()
+                content = output['choices'][0]['message'].get('content', '') or ''
+                out1 = content.removeprefix(": ").lstrip()
                 out2 = [out1]
         else:
             user_content.append({"type": "text", "text": prompt_text})
             messages.append({"role": "user", "content": user_content})
             output = LLAMA_CPP_STORAGE.llm.create_chat_completion(messages=messages, seed=seed, **_parameters)
-            out1 = output['choices'][0]['message']['content'].removeprefix(": ").lstrip()
+            content = output['choices'][0]['message'].get('content', '') or ''
+            out1 = content.removeprefix(": ").lstrip()
             out2 = [out1]
             
         if save_states:

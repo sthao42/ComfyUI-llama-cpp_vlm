@@ -7,17 +7,19 @@ app.registerExtension({
             const onNodeCreated = nodeType.prototype.onNodeCreated;
             nodeType.prototype.onNodeCreated = function () {
                 const me = onNodeCreated?.apply(this, arguments);
-                const MAX_IMAGES_INDEX = 7; // Total 8 sockets: image_0 to image_7
+                const MAX_IMAGES_INDEX = 7; // image_0 to image_7
                 
                 const updateImageInputs = () => {
                     if (!this.inputs) return;
                     
                     let maxConnectedNum = -1;
                     for (const input of this.inputs) {
-                        if (input.name && input.name.startsWith("image_")) {
+                        if (input && input.name && input.name.startsWith("image_")) {
                             const num = parseInt(input.name.replace("image_", ""), 10);
-                            if (!isNaN(num) && input.link !== null) {
-                                if (num > maxConnectedNum) {
+                            if (!isNaN(num)) {
+                                // Check if input has an active link
+                                const isConnected = input.link != null && input.link !== undefined;
+                                if (isConnected && num > maxConnectedNum) {
                                     maxConnectedNum = num;
                                 }
                             }
@@ -40,11 +42,13 @@ app.registerExtension({
                         const input = this.inputs[i];
                         if (input && input.name && input.name.startsWith("image_")) {
                             const num = parseInt(input.name.replace("image_", ""), 10);
-                            if (!isNaN(num) && num > targetMax && input.link === null) {
+                            if (!isNaN(num) && num > targetMax && (input.link == null || input.link === undefined)) {
                                 this.removeInput(i);
                             }
                         }
                     }
+                    
+                    app.graph?.setDirtyCanvas(true, true);
                 };
 
                 const origOnConnectionsChange = this.onConnectionsChange;
@@ -52,7 +56,31 @@ app.registerExtension({
                     if (origOnConnectionsChange) {
                         origOnConnectionsChange.apply(this, arguments);
                     }
-                    updateImageInputs();
+                    setTimeout(() => updateImageInputs(), 20);
+                };
+
+                const origOnConnectInput = this.onConnectInput;
+                this.onConnectInput = function () {
+                    if (origOnConnectInput) {
+                        origOnConnectInput.apply(this, arguments);
+                    }
+                    setTimeout(() => updateImageInputs(), 20);
+                };
+
+                const origOnDisconnectInput = this.onDisconnectInput;
+                this.onDisconnectInput = function () {
+                    if (origOnDisconnectInput) {
+                        origOnDisconnectInput.apply(this, arguments);
+                    }
+                    setTimeout(() => updateImageInputs(), 20);
+                };
+
+                const origOnConfigure = this.onConfigure;
+                this.onConfigure = function () {
+                    if (origOnConfigure) {
+                        origOnConfigure.apply(this, arguments);
+                    }
+                    setTimeout(() => updateImageInputs(), 50);
                 };
 
                 setTimeout(() => updateImageInputs(), 50);
