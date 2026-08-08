@@ -543,7 +543,6 @@ class llama_cpp_instruct_adv:
             },
             "optional": {
                 "parameters": ("LLAMACPPARAMS",),
-                "images": ("IMAGE",),
                 "image_0": ("IMAGE",),
                 "queue_handler": (any_type, {"tooltip": "Used to control the execution order of instruct nodes."}),
             },
@@ -566,7 +565,7 @@ class llama_cpp_instruct_adv:
                         item["image_url"]["url"] = "data:image/png;base64,iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAIAAACQd1PeAAAACXBIWXMAAAsTAAALEwEAmpwYAAAADElEQVQImWP4//8/AAX+Av5Y8msOAAAAAElFTkSuQmCC"
         return clean_messages
     
-    def process(self, llama_model, preset_prompt, custom_prompt, system_prompt, inference_mode, max_frames, max_size, seed, force_offload, save_states, unique_id, parameters=None, images=None, queue_handler=None, **kwargs):
+    def process(self, llama_model, preset_prompt, custom_prompt, system_prompt, inference_mode, max_frames, max_size, seed, force_offload, save_states, unique_id, parameters=None, queue_handler=None, **kwargs):
         if not LLAMA_CPP_STORAGE.llm:
             LLAMA_CPP_STORAGE.load_model(llama_model)
             #raise RuntimeError("The model has been unloaded or failed to load!")
@@ -613,19 +612,10 @@ class llama_cpp_instruct_adv:
         else:
             prompt_text = preset_prompts[preset_prompt].replace("#", custom_prompt.strip()).replace("@", "video" if video_input else "image")
             
-        # Collect all image inputs from images batch and image_0..image_8
+        # Collect all image inputs from image_0..image_7 (and images if provided)
         all_images = []
-        if images is not None:
-            if isinstance(images, list):
-                all_images.extend(images)
-            elif len(images.shape) == 4:
-                for i in range(images.shape[0]):
-                    all_images.append(images[i])
-            else:
-                all_images.append(images)
-                
-        for idx in range(0, 9):
-            img_val = kwargs.get(f"image_{idx}", None)
+        for key in ["images"] + [f"image_{i}" for i in range(8)]:
+            img_val = kwargs.get(key, None)
             if img_val is not None:
                 if isinstance(img_val, list):
                     all_images.extend(img_val)

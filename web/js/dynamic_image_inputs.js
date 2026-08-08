@@ -7,7 +7,7 @@ app.registerExtension({
             const onNodeCreated = nodeType.prototype.onNodeCreated;
             nodeType.prototype.onNodeCreated = function () {
                 const me = onNodeCreated?.apply(this, arguments);
-                const MAX_IMAGES = 8;
+                const MAX_IMAGES_INDEX = 7; // Total 8 sockets: image_0 to image_7
                 
                 const updateImageInputs = () => {
                     if (!this.inputs) return;
@@ -24,7 +24,7 @@ app.registerExtension({
                         }
                     }
                     
-                    const targetMax = Math.min(MAX_IMAGES, Math.max(0, maxConnectedNum + 1));
+                    const targetMax = Math.min(MAX_IMAGES_INDEX, Math.max(0, maxConnectedNum + 1));
                     
                     // Add missing sockets up to targetMax (image_0 .. image_targetMax)
                     for (let i = 0; i <= targetMax; i++) {
