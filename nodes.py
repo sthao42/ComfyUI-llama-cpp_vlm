@@ -124,18 +124,15 @@ class LLAMA_CPP_STORAGE:
     llm = None
     chat_handler = None
     current_config = None
-    #states = {}
     messages = {}
     sys_prompts = {}
 
     @classmethod
     def clean_state(cls, id=-1):
         if id == -1:
-            #cls.states.clear()
             cls.messages.clear()
             cls.sys_prompts.clear()
         else:
-            #cls.states.pop(f"{id}", None)
             cls.messages.pop(f"{id}", None)
             cls.sys_prompts.pop(f"{id}", None)
         
@@ -211,7 +208,7 @@ class LLAMA_CPP_STORAGE:
                 case "None":
                     return None
                 case _:
-                    raise ValueError(f'Unknow model type: "{chat_handler}"')
+                    raise ValueError(f'Unknown model type: "{chat_handler}"')
         
         cls.clean(all=True)
         cls.current_config = config.copy()
@@ -255,7 +252,6 @@ class LLAMA_CPP_STORAGE:
             
             print(f"[llama-cpp_vlm] Loading clip:  {mmproj}")
             
-            import inspect
             handler_params = inspect.signature(handler.__init__).parameters
             think_mode = "Thinking" in chat_handler
             kwargs = {"verbose": False}
@@ -289,7 +285,6 @@ class LLAMA_CPP_STORAGE:
         
         print(f"[llama-cpp_vlm] Loading model: {model}")
         print(f"[llama-cpp_vlm] n_gpu_layers = {n_gpu_layers}")
-        import inspect
         llama_init_params = inspect.signature(Llama.__init__).parameters
         
         llama_kwargs = {
@@ -549,24 +544,6 @@ class llama_cpp_model_loader:
     FUNCTION = "loadmodel"
     CATEGORY = "llama-cpp-vlm"
     
-    '''
-    @classmethod
-    def IS_CHANGED(s, model, mmproj, chat_handler, n_ctx, vram_limit, image_min_tokens, image_max_tokens):
-        if LLAMA_CPP_STORAGE.llm is None:
-            return float("NaN") 
-        
-        custom_config = {
-            "model": model,
-            "mmproj": mmproj,
-            "chat_handler":chat_handler,
-            "n_ctx": n_ctx,
-            "vram_limit": vram_limit,
-            "image_min_tokens": image_min_tokens,
-            "image_max_tokens": image_max_tokens
-        }
-        config_str = json.dumps(custom_config, sort_keys=True, ensure_ascii=False)
-        return config_str
-    '''
     def loadmodel(self, model, mmproj, chat_handler, n_ctx, vram_limit, image_min_tokens, image_max_tokens, n_batch=2048, n_ubatch=512, enable_mtp=False, flash_attn=True, offload_kqv=True, kv_cache_type="f16", n_threads=0):
         custom_config = {
             "model": model,
@@ -686,7 +663,6 @@ class llama_cpp_instruct_adv:
             if save_states:
                 try:
                     print(f"[llama-cpp_vlm] Loading state and history id={uid}...")
-                    #LLAMA_CPP_STORAGE.llm.load_state(LLAMA_CPP_STORAGE.states[f"{uid}"])
                     messages = LLAMA_CPP_STORAGE.messages.get(f"{uid}", [])
                 except Exception as e:
                     messages = []
@@ -1379,7 +1355,7 @@ class PromptEnhancerPreset:
             case "Wan FLF2V [ZH]":
                 return (WAN_FLF2V_ZH,)
             case _:
-                raise ValueError(f'Unknow preset: "{preset}"')
+                raise ValueError(f'Unknown preset: "{preset}"')
         
 NODE_CLASS_MAPPINGS = {
     "llama_cpp_model_loader": llama_cpp_model_loader,
