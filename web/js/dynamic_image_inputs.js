@@ -2,58 +2,62 @@ import { app } from "../../scripts/app.js";
 
 app.registerExtension({
     name: "ComfyUI-llama-cpp_vlm.DynamicImageInputs",
-    async nodeCreated(node) {
-        if (node.comfyClass === "llama_cpp_instruct_adv" || node.comfyClass === "llama_cpp_instruct") {
-            const MAX_IMAGES = 8;
-            
-            function updateImageInputs() {
-                if (!node.inputs) return;
+    async beforeRegisterNodeDef(nodeType, nodeData, app) {
+        if (nodeData.name === "llama_cpp_instruct_adv" || nodeData.name === "llama_cpp_instruct") {
+            const onNodeCreated = nodeType.prototype.onNodeCreated;
+            nodeType.prototype.onNodeCreated = function () {
+                const me = onNodeCreated?.apply(this, arguments);
+                const MAX_IMAGES = 8;
                 
-                let lastConnectedIdx = 0;
-                for (let i = 0; i < node.inputs.length; i++) {
-                    const input = node.inputs[i];
-                    if (input && input.name && input.name.startsWith("image_")) {
-                        const num = parseInt(input.name.replace("image_", ""), 10);
-                        if (!isNaN(num) && input.link != null) {
-                            if (num > lastConnectedIdx) {
-                                lastConnectedIdx = num;
+                const updateImageInputs = () => {
+                    if (!this.inputs) return;
+                    
+                    let maxConnectedNum = 0;
+                    for (const input of this.inputs) {
+                        if (input.name && input.name.startsWith("image_")) {
+                            const num = parseInt(input.name.replace("image_", ""), 10);
+                            if (!isNaN(num) && input.link !== null) {
+                                if (num > maxConnectedNum) {
+                                    maxConnectedNum = num;
+                                }
                             }
                         }
                     }
-                }
-                
-                const maxVisibleIdx = Math.min(MAX_IMAGES, Math.max(1, lastConnectedIdx + 1));
-                
-                // Ensure sockets up to maxVisibleIdx exist
-                for (let i = 1; i <= maxVisibleIdx; i++) {
-                    const inputName = `image_${i}`;
-                    const existing = node.inputs.find(inp => inp && inp.name === inputName);
-                    if (!existing) {
-                        node.addInput(inputName, "IMAGE");
-                    }
-                }
-                
-                // Prune unlinked trailing inputs > maxVisibleIdx
-                for (let i = node.inputs.length - 1; i >= 0; i--) {
-                    const input = node.inputs[i];
-                    if (input && input.name && input.name.startsWith("image_")) {
-                        const num = parseInt(input.name.replace("image_", ""), 10);
-                        if (!isNaN(num) && num > maxVisibleIdx && input.link == null) {
-                            node.removeInput(i);
+                    
+                    const targetMax = Math.min(MAX_IMAGES, Math.max(1, maxConnectedNum + 1));
+                    
+                    // Add missing sockets up to targetMax
+                    for (let i = 1; i <= targetMax; i++) {
+                        const inputName = `image_${i}`;
+                        const existing = this.inputs.find(inp => inp && inp.name === inputName);
+                        if (!existing) {
+                            this.addInput(inputName, "IMAGE");
                         }
                     }
-                }
-            }
+                    
+                    // Remove unlinked trailing inputs greater than targetMax
+                    for (let i = this.inputs.length - 1; i >= 0; i--) {
+                        const input = this.inputs[i];
+                        if (input && input.name && input.name.startsWith("image_")) {
+                            const num = parseInt(input.name.replace("image_", ""), 10);
+                            if (!isNaN(num) && num > targetMax && input.link === null) {
+                                this.removeInput(i);
+                            }
+                        }
+                    }
+                };
 
-            const origOnConnectionsChange = node.onConnectionsChange;
-            node.onConnectionsChange = function (type, index, connected, link_info, input_info) {
-                if (origOnConnectionsChange) {
-                    origOnConnectionsChange.apply(this, arguments);
-                }
-                updateImageInputs();
+                const origOnConnectionsChange = this.onConnectionsChange;
+                this.onConnectionsChange = function (type, index, connected, link_info, input_info) {
+                    if (origOnConnectionsChange) {
+                        origOnConnectionsChange.apply(this, arguments);
+                    }
+                    updateImageInputs();
+                };
+
+                setTimeout(() => updateImageInputs(), 50);
+                return me;
             };
-
-            setTimeout(updateImageInputs, 50);
         }
     }
 });
