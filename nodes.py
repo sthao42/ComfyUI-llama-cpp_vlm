@@ -309,10 +309,12 @@ class LLAMA_CPP_STORAGE:
 
         kv_cache_type = config.get("kv_cache_type", "f16")
         if kv_cache_type != "f16":
+            type_map = {"f16": 1, "q4_0": 2, "q8_0": 8}
+            kv_val = type_map.get(kv_cache_type, 1)
             if "type_k" in llama_init_params:
-                llama_kwargs["type_k"] = kv_cache_type
+                llama_kwargs["type_k"] = kv_val
             if "type_v" in llama_init_params:
-                llama_kwargs["type_v"] = kv_cache_type
+                llama_kwargs["type_v"] = kv_val
 
         n_threads = config.get("n_threads", 0)
         if n_threads > 0 and "n_threads" in llama_init_params:
