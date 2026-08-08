@@ -1,9 +1,11 @@
 import os
 import io
 import gc
+import re
 import json
 import base64
 import random
+import inspect
 import torch
 
 import numpy as np
@@ -25,12 +27,14 @@ from llama_cpp.llama_chat_format import (
 
 try:
     from llama_cpp.llama_chat_format import MTMDChatHandler
-    chat_handlers += ["DeepSeek-OCR"]
     _MTMD = True
 except:
     _MTMD = False
 
 chat_handlers = ["None", "LLaVA-1.5", "LLaVA-1.6", "Moondream2", "nanoLLaVA", "llama3-Vision-Alpha", "MiniCPM-v2.6"]
+
+if _MTMD:
+    chat_handlers.append("DeepSeek-OCR")
 
 try:
     from llama_cpp.llama_chat_format import Gemma3ChatHandler
@@ -660,22 +664,14 @@ class llama_cpp_instruct_adv:
             prompt_text = preset_prompts[preset_prompt].replace("#", custom_prompt.strip()).replace("@", "video" if video_input else "image")
             
         # Collect all image inputs from image_0..image_7 (and images if provided)
-        all_images = []
-        for key in ["images"] + [f"image_{i}" for i in range(8)]:
-            img_val = kwargs.get(key, None)
-            if img_val is not None:
-                if isinstance(img_val, list):
-                    all_images.extend(img_val)
-                elif len(img_val.shape) == 4:
-                    for i in range(img_val.shape[0]):
-                        all_images.append(img_val[i])
-                else:
-                    all_images.append(img_val)
+        all_images = collect_image_inputs(kwargs)
 
-        import re
         pattern = re.compile(r'(?:<|\[)(?:Picture|image|img)\s*([0-9]\d*)(?:>|\])', re.IGNORECASE)
         placeholders = list(pattern.finditer(prompt_text))
         has_zero = any(int(m.group(1)) == 0 for m in placeholders)
+
+        completion_params = inspect.signature(LLAMA_CPP_STORAGE.llm.create_chat_completion).parameters
+        final_params = {k: v for k, v in _parameters.items() if k in completion_params}
 
         if len(all_images) > 0:
             h = LLAMA_CPP_STORAGE.chat_handler
@@ -712,7 +708,7 @@ class llama_cpp_instruct_adv:
                         {"type": "image_url", "image_url": {"url": f"data:image/jpeg;base64,{data}"}}
                     ]
                     frame_messages = messages + [{"role": "user", "content": frame_user_content}]
-                    output = LLAMA_CPP_STORAGE.llm.create_chat_completion(messages=frame_messages, seed=seed, **_parameters)
+                    output = LLAMA_CPP_STORAGE.llm.create_chat_completion(messages=frame_messages, seed=seed, **final_params)
                     content = output['choices'][0]['message'].get('content', '') or ''
                     text = content.removeprefix(": ").lstrip()
                     out2.append(text)
@@ -764,34 +760,18 @@ class llama_cpp_instruct_adv:
                             user_content.append({"type": "text", "text": f"\n<Picture {tag_num}>:\n"})
                         user_content.append({"type": "image_url", "image_url": {"url": b64_url}})
 
-                import inspect
-                completion_params = inspect.signature(LLAMA_CPP_STORAGE.llm.create_chat_completion).parameters
-                final_params = {k: v for k, v in _parameters.items() if k in completion_params}
-
                 messages.append({"role": "user", "content": user_content})
                 output = LLAMA_CPP_STORAGE.llm.create_chat_completion(messages=messages, seed=seed, **final_params)
                 content = output['choices'][0]['message'].get('content', '') or ''
                 out1 = content.removeprefix(": ").lstrip()
                 out2 = [out1]
         else:
-            import inspect
-            completion_params = inspect.signature(LLAMA_CPP_STORAGE.llm.create_chat_completion).parameters
-            final_params = {k: v for k, v in _parameters.items() if k in completion_params}
-
             user_content.append({"type": "text", "text": prompt_text})
             messages.append({"role": "user", "content": user_content})
             output = LLAMA_CPP_STORAGE.llm.create_chat_completion(messages=messages, seed=seed, **final_params)
             content = output['choices'][0]['message'].get('content', '') or ''
             out1 = content.removeprefix(": ").lstrip()
             out2 = [out1]
-
-        # Strip reasoning thinking blocks (<think>...</think>) from main out1 string
-        def strip_think_block(text: str) -> str:
-            if not text:
-                return ""
-            cleaned = re.sub(r'<think>.*?</think>', '', text, flags=re.DOTALL)
-            cleaned = re.sub(r'<think>.*$', '', cleaned, flags=re.DOTALL)
-            return cleaned.strip()
 
         out1 = strip_think_block(out1)
             
