@@ -44,9 +44,10 @@ class TestComfyUILlamaCppVLM(unittest.TestCase):
     def test_instruct_adv_optional_inputs(self):
         inputs = nodes.llama_cpp_instruct_adv.INPUT_TYPES()
         optional_keys = list(inputs['optional'].keys())
-        for i in range(8):
+        for i in range(9):
             self.assertIn(f'image_{i}', optional_keys)
-            self.assertIn(f'video_{i}', optional_keys)
+        self.assertIn('video_0', optional_keys)
+        self.assertNotIn('video_1', optional_keys)
 
     def test_scale_image_safety(self):
         # Test 4D tensor [1, 256, 256, 3]

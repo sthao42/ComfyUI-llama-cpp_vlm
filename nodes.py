@@ -454,10 +454,10 @@ def strip_think_block(text: str) -> str:
     return cleaned.strip()
 
 def collect_image_inputs(kwargs: dict) -> list:
-    """Collect image and video frame inputs dynamically from kwargs (image_0..image_7 and video_0..video_7)."""
+    """Collect image and video frame inputs dynamically from kwargs (image_0..image_8 and video_0)."""
     all_images = []
-    # Collect image sockets (image_0 to image_7 and images)
-    for key in ["images"] + [f"image_{i}" for i in range(8)]:
+    # Collect image sockets (image_0 to image_8 and images)
+    for key in ["images"] + [f"image_{i}" for i in range(9)]:
         img_val = kwargs.get(key, None)
         if img_val is not None:
             if isinstance(img_val, list):
@@ -468,17 +468,16 @@ def collect_image_inputs(kwargs: dict) -> list:
             else:
                 all_images.append(img_val)
                 
-    # Collect video sockets (video_0 to video_7)
-    for key in [f"video_{i}" for i in range(8)]:
-        vid_val = kwargs.get(key, None)
-        if vid_val is not None:
-            if isinstance(vid_val, list):
-                all_images.extend(vid_val)
-            elif len(vid_val.shape) == 4:
-                for i in range(vid_val.shape[0]):
-                    all_images.append(vid_val[i])
-            else:
-                all_images.append(vid_val)
+    # Collect video socket (video_0)
+    vid_val = kwargs.get("video_0", None)
+    if vid_val is not None:
+        if isinstance(vid_val, list):
+            all_images.extend(vid_val)
+        elif len(vid_val.shape) == 4:
+            for i in range(vid_val.shape[0]):
+                all_images.append(vid_val[i])
+        else:
+            all_images.append(vid_val)
                 
     return all_images
 
@@ -616,14 +615,8 @@ class llama_cpp_instruct_adv:
                 "image_5": ("IMAGE",),
                 "image_6": ("IMAGE",),
                 "image_7": ("IMAGE",),
+                "image_8": ("IMAGE",),
                 "video_0": ("IMAGE",),
-                "video_1": ("IMAGE",),
-                "video_2": ("IMAGE",),
-                "video_3": ("IMAGE",),
-                "video_4": ("IMAGE",),
-                "video_5": ("IMAGE",),
-                "video_6": ("IMAGE",),
-                "video_7": ("IMAGE",),
                 "queue_handler": (any_type, {"tooltip": "Used to control the execution order of instruct nodes."}),
             },
             
