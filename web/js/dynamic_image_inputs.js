@@ -5,77 +5,80 @@ const TARGET_CLASSES = new Set([
     "Llama-cpp Instruct"
 ]);
 
-const IMAGE_INPUT_PREFIX = "image_";
-const IMAGE_INPUT_TYPE = "IMAGE";
-const MAX_IMAGES = 8;
+const MAX_SOCKETS = 8;
 
 function isTargetNode(nodeOrData) {
     const className = nodeOrData?.comfyClass || nodeOrData?.type || nodeOrData?.name;
     return TARGET_CLASSES.has(className);
 }
 
-function isDynamicImageInput(input) {
-    return Boolean(input?.name && String(input.name).startsWith(IMAGE_INPUT_PREFIX));
+function isDynamicInput(input, prefix) {
+    return Boolean(input?.name && String(input.name).startsWith(prefix));
 }
 
-function getDynamicImageInputs(node) {
-    return (node.inputs || []).filter(isDynamicImageInput);
+function getDynamicInputs(node, prefix) {
+    return (node.inputs || []).filter(inp => isDynamicInput(inp, prefix));
 }
 
-function renumberDynamicImageInputs(node) {
+function renumberDynamicInputs(node, prefix) {
     let nextIndex = 0;
     for (const input of node.inputs || []) {
-        if (!isDynamicImageInput(input)) {
+        if (!isDynamicInput(input, prefix)) {
             continue;
         }
-        input.name = `${IMAGE_INPUT_PREFIX}${nextIndex}`;
+        input.name = `${prefix}${nextIndex}`;
         input.label = input.name;
         nextIndex += 1;
     }
 }
 
-function ensureTrailingDynamicImageInput(node) {
-    const imageInputs = getDynamicImageInputs(node);
-    if (imageInputs.length >= MAX_IMAGES) {
+function ensureTrailingDynamicInput(node, prefix, type) {
+    const dynamicInputs = getDynamicInputs(node, prefix);
+    if (dynamicInputs.length >= MAX_SOCKETS) {
         return;
     }
     
-    if (!imageInputs.length || imageInputs[imageInputs.length - 1].link != null) {
-        const newIndex = imageInputs.length;
-        const inputName = `${IMAGE_INPUT_PREFIX}${newIndex}`;
+    if (!dynamicInputs.length || dynamicInputs[dynamicInputs.length - 1].link != null) {
+        const newIndex = dynamicInputs.length;
+        const inputName = `${prefix}${newIndex}`;
         
         // Find queue_handler index to insert above queue_handler
         const queueIdx = (node.inputs || []).findIndex(inp => inp && inp.name === "queue_handler");
         if (queueIdx !== -1) {
-            node.addInput(inputName, IMAGE_INPUT_TYPE);
+            node.addInput(inputName, type);
             const newInput = node.inputs.pop();
             node.inputs.splice(queueIdx, 0, newInput);
         } else {
-            node.addInput(inputName, IMAGE_INPUT_TYPE);
+            node.addInput(inputName, type);
         }
     }
 }
 
-function syncDynamicImageInputs(node) {
-    if (!node || node.__syncingImageInputs) {
+function syncDynamicCategoryInputs(node, prefix, type) {
+    // Remove unconnected dynamic inputs except during node configuration
+    if (!node._configuring) {
+        for (let index = (node.inputs || []).length - 1; index >= 0; index -= 1) {
+            const input = node.inputs[index];
+            if (isDynamicInput(input, prefix) && input.link == null) {
+                node.removeInput(index);
+            }
+        }
+    }
+
+    renumberDynamicInputs(node, prefix);
+    ensureTrailingDynamicInput(node, prefix, type);
+    renumberDynamicInputs(node, prefix);
+}
+
+function syncAllDynamicInputs(node) {
+    if (!node || node.__syncingDynamicInputs) {
         return;
     }
 
-    node.__syncingImageInputs = true;
+    node.__syncingDynamicInputs = true;
     try {
-        // Remove unconnected dynamic inputs except during node configuration
-        if (!node._configuring) {
-            for (let index = (node.inputs || []).length - 1; index >= 0; index -= 1) {
-                const input = node.inputs[index];
-                if (isDynamicImageInput(input) && input.link == null) {
-                    node.removeInput(index);
-                }
-            }
-        }
-
-        renumberDynamicImageInputs(node);
-        ensureTrailingDynamicImageInput(node);
-        renumberDynamicImageInputs(node);
+        syncDynamicCategoryInputs(node, "image_", "IMAGE");
+        syncDynamicCategoryInputs(node, "video_", "IMAGE");
 
         if (typeof node.computeSize === "function" && typeof node.setSize === "function") {
             const computed = node.computeSize();
@@ -92,7 +95,7 @@ function syncDynamicImageInputs(node) {
         }
         app.graph?.setDirtyCanvas(true, true);
     } finally {
-        node.__syncingImageInputs = false;
+        node.__syncingDynamicInputs = false;
     }
 }
 
@@ -107,7 +110,7 @@ app.registerExtension({
         nodeType.prototype.onNodeCreated = function() {
             const result = onNodeCreated ? onNodeCreated.apply(this, arguments) : undefined;
             setTimeout(() => {
-                syncDynamicImageInputs(this);
+                syncAllDynamicInputs(this);
             }, 50);
             return result;
         };
@@ -116,11 +119,11 @@ app.registerExtension({
         nodeType.prototype.onConnectionsChange = function(type, index, connected, linkInfo) {
             const result = onConnectionsChange ? onConnectionsChange.apply(this, arguments) : undefined;
             const input = this.inputs?.[index];
-            if (type === 2 && !isDynamicImageInput(input)) {
+            if (type === 2 && !isDynamicInput(input, "image_") && !isDynamicInput(input, "video_")) {
                 return result;
             }
 
-            setTimeout(() => syncDynamicImageInputs(this), 0);
+            setTimeout(() => syncAllDynamicInputs(this), 0);
             return result;
         };
 
@@ -129,13 +132,13 @@ app.registerExtension({
             this._configuring = true;
             const result = onConfigure ? onConfigure.apply(this, arguments) : undefined;
             this._configuring = false;
-            setTimeout(() => syncDynamicImageInputs(this), 50);
+            setTimeout(() => syncAllDynamicInputs(this), 50);
             return result;
         };
     },
     async nodeCreated(node) {
         if (isTargetNode(node)) {
-            setTimeout(() => syncDynamicImageInputs(node), 50);
+            setTimeout(() => syncAllDynamicInputs(node), 50);
         }
     }
 });

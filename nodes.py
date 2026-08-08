@@ -459,8 +459,9 @@ def strip_think_block(text: str) -> str:
     return cleaned.strip()
 
 def collect_image_inputs(kwargs: dict) -> list:
-    """Collect image inputs dynamically from image_0..image_7 and images kwargs."""
+    """Collect image and video frame inputs dynamically from kwargs (image_0..image_7 and video_0..video_7)."""
     all_images = []
+    # Collect image sockets (image_0 to image_7 and images)
     for key in ["images"] + [f"image_{i}" for i in range(8)]:
         img_val = kwargs.get(key, None)
         if img_val is not None:
@@ -471,6 +472,19 @@ def collect_image_inputs(kwargs: dict) -> list:
                     all_images.append(img_val[i])
             else:
                 all_images.append(img_val)
+                
+    # Collect video sockets (video_0 to video_7)
+    for key in [f"video_{i}" for i in range(8)]:
+        vid_val = kwargs.get(key, None)
+        if vid_val is not None:
+            if isinstance(vid_val, list):
+                all_images.extend(vid_val)
+            elif len(vid_val.shape) == 4:
+                for i in range(vid_val.shape[0]):
+                    all_images.append(vid_val[i])
+            else:
+                all_images.append(vid_val)
+                
     return all_images
 
 class llama_cpp_model_loader:
@@ -618,6 +632,7 @@ class llama_cpp_instruct_adv:
             "optional": {
                 "parameters": ("LLAMACPPARAMS",),
                 "image_0": ("IMAGE",),
+                "video_0": ("IMAGE",),
                 "queue_handler": (any_type, {"tooltip": "Used to control the execution order of instruct nodes."}),
             },
             

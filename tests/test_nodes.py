@@ -45,7 +45,9 @@ class TestComfyUILlamaCppVLM(unittest.TestCase):
         inputs = nodes.llama_cpp_instruct_adv.INPUT_TYPES()
         optional_keys = list(inputs['optional'].keys())
         self.assertIn('image_0', optional_keys)
+        self.assertIn('video_0', optional_keys)
         self.assertNotIn('image_1', optional_keys, "image_1 should not be static; it must expand dynamically in JS")
+        self.assertNotIn('video_1', optional_keys, "video_1 should not be static; it must expand dynamically in JS")
         self.assertNotIn('images', optional_keys, "images should be removed in favor of image_0")
 
     def test_scale_image_safety(self):
