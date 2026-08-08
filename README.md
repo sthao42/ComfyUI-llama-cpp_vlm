@@ -69,9 +69,6 @@ python -m pip install -r ComfyUI-llama-cpp_vlm/requirements.txt
 ### `llama_cpp_parameters`
 * **`max_tokens`**: Maximum generated tokens (default: `4096`, set `-1` for uncapped generation).
 * **`stop`**: Comma-separated list of phrases to halt generation instantly (e.g. `"###, \n\n"`).
-* **`dry_multiplier` / `dry_base` / `dry_allowed_length`**: DRY (Don't Repeat Yourself) sampler to eliminate repetitive phrasing.
-* **`dynatemp_range`**: Dynamic temperature sampling range (`0.0` = disabled).
-* **`xtc_threshold` / `xtc_probability`**: Exclude Top Choices (XTC) sampler.
 * **`reasoning_budget`**: Max token budget for thinking models (`Gemma4-Thinking`, `Qwen3.6-Thinking`).
 * **`temperature`**, **`top_p`**, **`min_p`**, **`repeat_penalty`**, **`present_penalty`**.
 

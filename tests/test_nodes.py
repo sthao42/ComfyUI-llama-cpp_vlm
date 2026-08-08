@@ -27,18 +27,10 @@ class TestComfyUILlamaCppVLM(unittest.TestCase):
         raw = {
             "max_tokens": 2048,
             "stop": "###, \\n\\n, User:",
-            "dry_multiplier": 0.8,
-            "dry_base": 1.75,
-            "dry_allowed_length": 2,
-            "dynatemp_range": 0.0,  # Should be popped
-            "xtc_threshold": 0.0,   # Should be popped
             "reasoning_budget": -1  # Should be popped
         }
         res = params_node.process(**raw)[0]
         self.assertEqual(res["stop"], ["###", "\n\n", "User:"])
-        self.assertEqual(res["dry_multiplier"], 0.8)
-        self.assertNotIn("dynatemp_range", res)
-        self.assertNotIn("xtc_threshold", res)
         self.assertNotIn("reasoning_budget", res)
 
     def test_instruct_adv_optional_inputs(self):

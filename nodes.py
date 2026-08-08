@@ -834,16 +834,7 @@ class llama_cpp_parameters:
                 "frequency_penalty": ("FLOAT", {"default": 0.0, "min": 0.0, "max": 1.0, "step": 0.01}),
                 "present_penalty": ("FLOAT", {"default": 0.0, "min": 0.0, "max": 2.0, "step": 0.01}),
                 "stop": ("STRING", {"default": "", "multiline": False, "tooltip": "Comma-separated list of stop phrases to halt generation (e.g. '###, \\n\\n')."}),
-                "dry_multiplier": ("FLOAT", {"default": 0.0, "min": 0.0, "max": 5.0, "step": 0.05, "tooltip": "DRY repetition sampler multiplier (0.0 = disabled)."}),
-                "dry_base": ("FLOAT", {"default": 1.75, "min": 1.0, "max": 5.0, "step": 0.05, "tooltip": "DRY sampler penalty base exponent."}),
-                "dry_allowed_length": ("INT", {"default": 2, "min": -1, "max": 32, "step": 1, "tooltip": "DRY sampler allowed sequence length before penalty applies."}),
-                "dynatemp_range": ("FLOAT", {"default": 0.0, "min": 0.0, "max": 2.0, "step": 0.05, "tooltip": "Dynamic temperature range (0.0 = disabled)."}),
-                "xtc_threshold": ("FLOAT", {"default": 0.0, "min": 0.0, "max": 0.5, "step": 0.01, "tooltip": "XTC sampler threshold (0.0 = disabled)."}),
-                "xtc_probability": ("FLOAT", {"default": 0.0, "min": 0.0, "max": 1.0, "step": 0.01, "tooltip": "XTC sampler probability."}),
                 "reasoning_budget": ("INT", {"default": -1, "min": -1, "max": 32768, "step": 64, "tooltip": "Token budget for thinking models like Gemma4-Thinking (-1 = no budget limit)."}),
-                "mirostat_mode": ("INT", {"default": 0, "min": 0, "max": 2, "step": 1}),
-                "mirostat_eta": ("FLOAT", {"default": 0.1, "min": 0.0, "max": 1.0, "step": 0.01}),
-                "mirostat_tau": ("FLOAT", {"default": 5.0, "min": 0.0, "max": 10.0, "step": 0.01}),
                 "state_uid": ("INT", {
                     "default": -1, "min": -1, "max": 999999, "step": 1,
                     "tooltip": "Use a specific ID to save the conversation state.\n(-1 = use node's unique_id)"
@@ -869,18 +860,6 @@ class llama_cpp_parameters:
                 kwargs.pop("stop", None)
         elif "stop" in kwargs:
             kwargs.pop("stop", None)
-
-        if kwargs.get("dry_multiplier", 0.0) == 0.0:
-            kwargs.pop("dry_multiplier", None)
-            kwargs.pop("dry_base", None)
-            kwargs.pop("dry_allowed_length", None)
-
-        if kwargs.get("dynatemp_range", 0.0) == 0.0:
-            kwargs.pop("dynatemp_range", None)
-
-        if kwargs.get("xtc_threshold", 0.0) == 0.0:
-            kwargs.pop("xtc_threshold", None)
-            kwargs.pop("xtc_probability", None)
 
         if kwargs.get("reasoning_budget", -1) in (-1, 0):
             kwargs.pop("reasoning_budget", None)

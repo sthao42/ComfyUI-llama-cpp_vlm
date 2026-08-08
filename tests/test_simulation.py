@@ -52,18 +52,10 @@ class TestEndToEndSimulation(unittest.TestCase):
             max_tokens=4096,
             temperature=0.7,
             stop="###, \\n\\n, User:",
-            dry_multiplier=0.8,
-            dry_base=1.75,
-            dry_allowed_length=2,
-            dynatemp_range=0.0,
-            xtc_threshold=0.0,
             reasoning_budget=-1
         )[0]
         
         self.assertEqual(params["stop"], ["###", "\n\n", "User:"])
-        self.assertEqual(params["dry_multiplier"], 0.8)
-        self.assertNotIn("dynatemp_range", params)
-        self.assertNotIn("xtc_threshold", params)
         self.assertNotIn("reasoning_budget", params)
         print("[OK] Parameter node processing test passed.")
 
