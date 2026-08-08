@@ -5,3 +5,7 @@ checkpoints/
 *.egg-info
 .pytest_cache
 .DS_Store
+*.log
+*.tmp
+.env*
+secrets/
