@@ -450,6 +450,29 @@ def draw_bbox(image, json, mode):
         draw.text((x0+2, text_y), label, fill=(255,255,255))
     return torch.from_numpy(np.array(img).astype(np.float32) / 255.0).unsqueeze(0)
 
+def strip_think_block(text: str) -> str:
+    """Sanitize output text by stripping reasoning <think>...</think> blocks."""
+    if not text:
+        return ""
+    cleaned = re.sub(r'<think>.*?</think>', '', text, flags=re.DOTALL)
+    cleaned = re.sub(r'<think>.*$', '', cleaned, flags=re.DOTALL)
+    return cleaned.strip()
+
+def collect_image_inputs(kwargs: dict) -> list:
+    """Collect image inputs dynamically from image_0..image_7 and images kwargs."""
+    all_images = []
+    for key in ["images"] + [f"image_{i}" for i in range(8)]:
+        img_val = kwargs.get(key, None)
+        if img_val is not None:
+            if isinstance(img_val, list):
+                all_images.extend(img_val)
+            elif len(img_val.shape) == 4:
+                for i in range(img_val.shape[0]):
+                    all_images.append(img_val[i])
+            else:
+                all_images.append(img_val)
+    return all_images
+
 class llama_cpp_model_loader:
     @classmethod
     def INPUT_TYPES(s):
@@ -815,7 +838,7 @@ class llama_cpp_parameters:
                 "stop": ("STRING", {"default": "", "multiline": False, "tooltip": "Comma-separated list of stop phrases to halt generation (e.g. '###, \\n\\n')."}),
                 "dry_multiplier": ("FLOAT", {"default": 0.0, "min": 0.0, "max": 5.0, "step": 0.05, "tooltip": "DRY repetition sampler multiplier (0.0 = disabled)."}),
                 "dry_base": ("FLOAT", {"default": 1.75, "min": 1.0, "max": 5.0, "step": 0.05, "tooltip": "DRY sampler penalty base exponent."}),
-                "dry_allowed_length": ("INT", {"default": 2, "min": 0, "max": 32, "step": 1, "tooltip": "DRY sampler allowed sequence length before penalty applies."}),
+                "dry_allowed_length": ("INT", {"default": 2, "min": -1, "max": 32, "step": 1, "tooltip": "DRY sampler allowed sequence length before penalty applies."}),
                 "dynatemp_range": ("FLOAT", {"default": 0.0, "min": 0.0, "max": 2.0, "step": 0.05, "tooltip": "Dynamic temperature range (0.0 = disabled)."}),
                 "xtc_threshold": ("FLOAT", {"default": 0.0, "min": 0.0, "max": 0.5, "step": 0.01, "tooltip": "XTC sampler threshold (0.0 = disabled)."}),
                 "xtc_probability": ("FLOAT", {"default": 0.0, "min": 0.0, "max": 1.0, "step": 0.01, "tooltip": "XTC sampler probability."}),
