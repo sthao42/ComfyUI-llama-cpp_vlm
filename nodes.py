@@ -854,7 +854,16 @@ class llama_cpp_parameters:
     def process(self, **kwargs):
         stop_val = kwargs.get("stop", "")
         if isinstance(stop_val, str) and stop_val.strip():
-            kwargs["stop"] = [s.strip() for s in stop_val.split(",") if s.strip()]
+            raw_stops = [s.strip() for s in stop_val.split(",") if s.strip()]
+            parsed_stops = []
+            for s in raw_stops:
+                parsed = s.replace("\\n", "\n").replace("\\t", "\t")
+                if parsed:
+                    parsed_stops.append(parsed)
+            if parsed_stops:
+                kwargs["stop"] = parsed_stops
+            else:
+                kwargs.pop("stop", None)
         elif "stop" in kwargs:
             kwargs.pop("stop", None)
 
