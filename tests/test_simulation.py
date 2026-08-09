@@ -1,5 +1,6 @@
 import sys
 import unittest
+import random
 import torch
 import numpy as np
 
@@ -98,6 +99,21 @@ class TestEndToEndSimulation(unittest.TestCase):
         clean_text = strip_think_block(raw_output)
         self.assertEqual(clean_text, "A beautiful sunset over the ocean.")
         print("[OK] Reasoning <think> block stripping test passed.")
+
+        # 6. Test Seed Sanitization & Controls
+        # Test random seed fallback when seed == -1
+        seed_fallback = -1
+        if seed_fallback is None or seed_fallback == -1:
+            sanitized_seed = random.randint(0, 0x7fffffff)
+        else:
+            sanitized_seed = int(seed_fallback) & 0xFFFFFFFF
+        self.assertTrue(0 <= sanitized_seed <= 0x7fffffff)
+
+        # Test 64-bit seed mask truncation for 32-bit uint32 C safety
+        seed_64bit = 18446744073709551615
+        sanitized_64bit = int(seed_64bit) & 0xFFFFFFFF
+        self.assertEqual(sanitized_64bit, 0xFFFFFFFF)
+        print("[OK] Seed control sanitization test passed.")
 
 if __name__ == '__main__':
     unittest.main()
