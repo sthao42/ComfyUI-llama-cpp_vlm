@@ -5,7 +5,7 @@ const TARGET_CLASSES = new Set([
     "Llama-cpp Instruct"
 ]);
 
-const MAX_SOCKETS = 8;
+const MAX_SOCKETS = 9;
 
 function isTargetNode(nodeOrData) {
     const className = nodeOrData?.comfyClass || nodeOrData?.type || nodeOrData?.name;
@@ -32,6 +32,25 @@ function renumberDynamicInputs(node, prefix) {
     }
 }
 
+function findInsertionIndex(node, prefix) {
+    const inputs = node.inputs || [];
+    let lastMatchIdx = -1;
+    for (let i = 0; i < inputs.length; i += 1) {
+        if (isDynamicInput(inputs[i], prefix)) {
+            lastMatchIdx = i;
+        }
+    }
+    if (lastMatchIdx !== -1) {
+        return lastMatchIdx + 1;
+    }
+
+    const anchorIdx = inputs.findIndex(inp => inp && (inp.name === "video_0" || inp.name === "queue_handler"));
+    if (anchorIdx !== -1) {
+        return anchorIdx;
+    }
+    return inputs.length;
+}
+
 function ensureTrailingDynamicInput(node, prefix, type) {
     const dynamicInputs = getDynamicInputs(node, prefix);
     if (dynamicInputs.length >= MAX_SOCKETS) {
@@ -41,27 +60,50 @@ function ensureTrailingDynamicInput(node, prefix, type) {
     if (!dynamicInputs.length || dynamicInputs[dynamicInputs.length - 1].link != null) {
         const newIndex = dynamicInputs.length;
         const inputName = `${prefix}${newIndex}`;
+        const insertIdx = findInsertionIndex(node, prefix);
 
-        const queueIdx = (node.inputs || []).findIndex(inp => inp && inp.name === "queue_handler");
-        if (queueIdx !== -1) {
-            node.addInput(inputName, type);
-            const newInput = node.inputs.pop();
-            node.inputs.splice(queueIdx, 0, newInput);
-        } else {
-            node.addInput(inputName, type);
+        node.addInput(inputName, type);
+        const newInput = node.inputs.pop();
+        node.inputs.splice(insertIdx, 0, newInput);
+    }
+}
+
+function removeInputSafely(node, index) {
+    if (!node || !node.inputs || index < 0 || index >= node.inputs.length) {
+        return;
+    }
+    const removedInput = node.inputs[index];
+    if (removedInput.link != null && node.graph) {
+        node.disconnectInput(index);
+    }
+    node.removeInput(index);
+
+    if (node.graph && node.graph.links) {
+        for (const linkId in node.graph.links) {
+            const link = node.graph.links[linkId];
+            if (link && link.target_id === node.id && link.target_slot > index) {
+                link.target_slot -= 1;
+            }
         }
     }
 }
 
 function syncDynamicCategoryInputs(node, prefix, type) {
     if (!node._configuring) {
-        for (let index = (node.inputs || []).length - 1; index >= 0; index -= 1) {
-            const input = node.inputs[index];
-            if (isDynamicInput(input, prefix) && input.link == null) {
-                const count = (node.inputs || []).filter(inp => isDynamicInput(inp, prefix)).length;
-                if (count > 1) {
-                    node.removeInput(index);
-                }
+        const dynamicInputs = getDynamicInputs(node, prefix);
+        let lastConnectedIdx = -1;
+        for (let i = 0; i < dynamicInputs.length; i += 1) {
+            if (dynamicInputs[i].link != null) {
+                lastConnectedIdx = i;
+            }
+        }
+        const keepCount = Math.max(1, lastConnectedIdx + 2);
+
+        for (let i = dynamicInputs.length - 1; i >= keepCount; i -= 1) {
+            const inputToRemove = dynamicInputs[i];
+            const actualIndex = (node.inputs || []).indexOf(inputToRemove);
+            if (actualIndex !== -1) {
+                removeInputSafely(node, actualIndex);
             }
         }
     }
@@ -83,12 +125,13 @@ function syncAllDynamicInputs(node) {
 
         if (typeof node.computeSize === "function" && typeof node.setSize === "function") {
             const computed = node.computeSize();
-            const current = node.size;
+            const current = node.size || [0, 0];
             node.setSize([
                 Math.max(current[0], computed[0]),
-                Math.max(current[1], computed[1])
+                computed[1]
             ]);
         }
+        node.setDirtyCanvas?.(true, true);
         app.graph?.setDirtyCanvas(true, true);
     } finally {
         node.__syncingDynamicInputs = false;
@@ -114,12 +157,13 @@ app.registerExtension({
         const onConnectionsChange = nodeType.prototype.onConnectionsChange;
         nodeType.prototype.onConnectionsChange = function(type, index, connected, linkInfo) {
             const result = onConnectionsChange ? onConnectionsChange.apply(this, arguments) : undefined;
-            const input = this.inputs?.[index];
-            if (type === 2 && !isDynamicInput(input, "image_") && !isDynamicInput(input, "video_")) {
+            if (type === 2) {
                 return result;
             }
-
-            setTimeout(() => syncAllDynamicInputs(this), 0);
+            const input = this.inputs?.[index];
+            if (input && (isDynamicInput(input, "image_") || isDynamicInput(input, "video_"))) {
+                setTimeout(() => syncAllDynamicInputs(this), 0);
+            }
             return result;
         };
 
@@ -138,3 +182,4 @@ app.registerExtension({
         }
     }
 });
+
