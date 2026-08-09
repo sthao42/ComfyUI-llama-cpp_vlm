@@ -73,5 +73,19 @@ class TestComfyUILlamaCppVLM(unittest.TestCase):
         sample_unclosed = "<think>\nGeneration cut off during thinking..."
         self.assertEqual(strip_think_block(sample_unclosed), "")
 
+    def test_seed_sanitization_and_is_changed(self):
+        inst = nodes.llama_cpp_instruct_adv()
+        import math
+        # Random seed -1 -> NaN in IS_CHANGED
+        self.assertTrue(math.isnan(inst.IS_CHANGED(None, "", "", "", "batch", 1, 256, -1, False, False, None)))
+        # Fixed seed -> deterministic string in IS_CHANGED
+        self.assertEqual(inst.IS_CHANGED(None, "", "", "", "batch", 1, 256, 42, False, True, None), "42_True")
+        # sanitize_seed protects against LLAMA_DEFAULT_SEED (0xFFFFFFFF)
+        self.assertEqual(inst.sanitize_seed(0xFFFFFFFF), 0xFFFFFFFF - 1)
+        # 64-bit seed bounds
+        self.assertEqual(inst.sanitize_seed(0xFFFFFFFFFFFFFFFF), 0xFFFFFFFF - 1)
+        # Frame offset calculation
+        self.assertEqual(inst.sanitize_seed(50, offset=5), 55)
+
 if __name__ == '__main__':
     unittest.main()

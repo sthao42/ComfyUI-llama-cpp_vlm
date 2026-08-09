@@ -100,20 +100,35 @@ class TestEndToEndSimulation(unittest.TestCase):
         self.assertEqual(clean_text, "A beautiful sunset over the ocean.")
         print("[OK] Reasoning <think> block stripping test passed.")
 
-        # 6. Test Seed Sanitization & Controls
-        # Test random seed fallback when seed == -1
-        seed_fallback = -1
-        if seed_fallback is None or seed_fallback == -1:
-            sanitized_seed = random.randint(0, 0x7fffffff)
-        else:
-            sanitized_seed = int(seed_fallback) & 0xFFFFFFFF
-        self.assertTrue(0 <= sanitized_seed <= 0x7fffffff)
+        # 6. Test Seed Sanitization, IS_CHANGED & Controls
+        inst = nodes.llama_cpp_instruct_adv()
+        
+        # Test IS_CHANGED returns NaN for random seed (-1) to bypass ComfyUI caching
+        changed_random = inst.IS_CHANGED(None, "", "", "", "batch", 1, 256, -1, False, False, None)
+        import math
+        self.assertTrue(math.isnan(changed_random))
+        
+        # Test IS_CHANGED returns string for fixed seed
+        changed_fixed = inst.IS_CHANGED(None, "", "", "", "batch", 1, 256, 12345, False, False, None)
+        self.assertEqual(changed_fixed, "12345_False")
 
-        # Test 64-bit seed mask truncation for 32-bit uint32 C safety
+        # Test random seed fallback when seed == -1
+        sanitized_rand = inst.sanitize_seed(-1)
+        self.assertTrue(0 <= sanitized_rand <= 0x7fffffff)
+
+        # Test LLAMA_DEFAULT_SEED (0xFFFFFFFF) protection to guarantee determinism
+        sanitized_default = inst.sanitize_seed(0xFFFFFFFF)
+        self.assertEqual(sanitized_default, 0xFFFFFFFF - 1)
+
+        # Test 64-bit seed mask truncation & protection
         seed_64bit = 18446744073709551615
-        sanitized_64bit = int(seed_64bit) & 0xFFFFFFFF
-        self.assertEqual(sanitized_64bit, 0xFFFFFFFF)
-        print("[OK] Seed control sanitization test passed.")
+        sanitized_64bit = inst.sanitize_seed(seed_64bit)
+        self.assertEqual(sanitized_64bit, 0xFFFFFFFF - 1)
+
+        # Test frame index offset stepping for multi-image one-by-one mode
+        sanitized_frame = inst.sanitize_seed(100, offset=3)
+        self.assertEqual(sanitized_frame, 103)
+        print("[OK] Seed control sanitization & IS_CHANGED caching tests passed.")
 
 if __name__ == '__main__':
     unittest.main()

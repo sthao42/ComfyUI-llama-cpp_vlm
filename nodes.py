@@ -608,7 +608,7 @@ class llama_cpp_instruct_adv:
                     "step": 64,
                     "tooltip": 'Max size of input images in "images" and "video" modes.'
                 }),
-                "seed": ("INT", {"default": 0, "min": 0, "max": 0x7fffffffffffffff, "step": 1, "control_after_generate": True}),
+                "seed": ("INT", {"default": 0, "min": 0, "max": 0xffffffffffffffff, "step": 1, "control_after_generate": True}),
                 "force_offload": ("BOOLEAN", {
                     "default": False,
                     "tooltip": "Unload the model after inference."
@@ -644,6 +644,21 @@ class llama_cpp_instruct_adv:
     FUNCTION = "process"
     CATEGORY = "llama-cpp-vlm"
     
+    @classmethod
+    def IS_CHANGED(cls, llama_model, preset_prompt, custom_prompt, system_prompt, inference_mode, max_frames, max_size, seed, force_offload, save_states, unique_id, parameters=None, queue_handler=None, **kwargs):
+        if seed is None or seed == -1:
+            return float("nan")
+        return f"{seed}_{save_states}"
+
+    def sanitize_seed(self, seed, offset=0):
+        if seed is None or seed == -1:
+            val = random.randint(0, 0x7fffffff)
+        else:
+            val = (int(seed) + offset) & 0xFFFFFFFF
+        if val == 0xFFFFFFFF:
+            val = 0xFFFFFFFF - 1
+        return val
+
     def sanitize_messages(self, messages):
         clean_messages = []
         for msg in messages:
@@ -668,10 +683,8 @@ class llama_cpp_instruct_adv:
         return clean_messages
     
     def process(self, llama_model, preset_prompt, custom_prompt, system_prompt, inference_mode, max_frames, max_size, seed, force_offload, save_states, unique_id, parameters=None, queue_handler=None, **kwargs):
-        if seed is None or seed == -1:
-            seed = random.randint(0, 0x7fffffff)
-        else:
-            seed = int(seed) & 0xFFFFFFFF
+        base_seed = seed
+        active_seed = self.sanitize_seed(base_seed)
 
         if not LLAMA_CPP_STORAGE.llm:
             LLAMA_CPP_STORAGE.load_model(llama_model)
@@ -761,8 +774,9 @@ class llama_cpp_instruct_adv:
                         {"type": "image_url", "image_url": {"url": f"data:image/jpeg;base64,{data}"}}
                     ]
                     frame_messages = messages + [{"role": "user", "content": frame_user_content}]
+                    frame_seed = self.sanitize_seed(base_seed, offset=i)
                     try:
-                        output = LLAMA_CPP_STORAGE.llm.create_chat_completion(messages=frame_messages, seed=seed, **final_params)
+                        output = LLAMA_CPP_STORAGE.llm.create_chat_completion(messages=frame_messages, seed=frame_seed, **final_params)
                     except Exception as e:
                         err_str = str(e)
                         if "context limit" in err_str.lower() or "eval_chunk_single" in err_str.lower() or "failed to find a memory slot" in err_str.lower() or "error code 1" in err_str.lower():
@@ -826,7 +840,7 @@ class llama_cpp_instruct_adv:
 
                 messages.append({"role": "user", "content": user_content})
                 try:
-                    output = LLAMA_CPP_STORAGE.llm.create_chat_completion(messages=messages, seed=seed, **final_params)
+                    output = LLAMA_CPP_STORAGE.llm.create_chat_completion(messages=messages, seed=active_seed, **final_params)
                 except Exception as e:
                     err_str = str(e)
                     if "context limit" in err_str.lower() or "eval_chunk_single" in err_str.lower() or "failed to find a memory slot" in err_str.lower() or "error code 1" in err_str.lower():
@@ -844,7 +858,7 @@ class llama_cpp_instruct_adv:
             user_content.append({"type": "text", "text": prompt_text})
             messages.append({"role": "user", "content": user_content})
             try:
-                output = LLAMA_CPP_STORAGE.llm.create_chat_completion(messages=messages, seed=seed, **final_params)
+                output = LLAMA_CPP_STORAGE.llm.create_chat_completion(messages=messages, seed=active_seed, **final_params)
             except Exception as e:
                 err_str = str(e)
                 if "context limit" in err_str.lower() or "eval_chunk_single" in err_str.lower() or "failed to find a memory slot" in err_str.lower() or "error code 1" in err_str.lower():
