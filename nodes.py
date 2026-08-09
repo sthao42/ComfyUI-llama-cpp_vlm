@@ -28,10 +28,25 @@ from llama_cpp.llama_chat_format import (
 try:
     from llama_cpp.llama_chat_format import MTMDChatHandler
     _MTMD = True
-except:
+except Exception:
     _MTMD = False
 
 chat_handlers = ["None", "LLaVA-1.5", "LLaVA-1.6", "Moondream2", "nanoLLaVA", "llama3-Vision-Alpha", "MiniCPM-v2.6"]
+
+# Pre-compiled module-level Regular Expressions for performance optimization
+PLACEHOLDER_PATTERN = re.compile(r'(?:<|\[)(?:Picture|image|img)\s*([0-9]\d*)(?:>|\])', re.IGNORECASE)
+THINK_BLOCK_PATTERN = re.compile(r'<think>.*?</think>', re.DOTALL)
+THINK_BLOCK_UNCLOSED_PATTERN = re.compile(r'<think>.*$', re.DOTALL)
+
+def get_safe_model_path(base_dir: str, filename: str) -> str:
+    """Validate and sanitize model filenames against directory traversal attacks."""
+    if not filename or filename == "None":
+        return ""
+    full_path = os.path.abspath(os.path.join(base_dir, filename))
+    base_dir_abs = os.path.abspath(base_dir)
+    if not full_path.startswith(base_dir_abs):
+        raise ValueError(f"Security Alert: Directory traversal detected in model path: '{filename}'")
+    return full_path
 
 if _MTMD:
     chat_handlers.append("DeepSeek-OCR")
@@ -233,16 +248,17 @@ class LLAMA_CPP_STORAGE:
             if n_batch < n_ubatch:
                 n_batch = n_ubatch
         
-        model_path = os.path.join(folder_paths.models_dir, 'LLM', model)
+        llm_dir = os.path.join(folder_paths.models_dir, 'LLM')
+        model_path = get_safe_model_path(llm_dir, model)
         handler = get_chat_handler(chat_handler)
         
         if vram_limit != -1:
             gguf_layers = get_layer_count(model_path) or 32
-            gguf_size = os.path.getsize(model_path)  * 1.55 / (1024 ** 3)
+            gguf_size = os.path.getsize(model_path) * 1.55 / (1024 ** 3)
             gguf_layer_size = gguf_size / gguf_layers
         
         if mmproj and mmproj != "None":
-            mmproj_path = os.path.join(folder_paths.models_dir, 'LLM', mmproj)
+            mmproj_path = get_safe_model_path(llm_dir, mmproj)
             if chat_handler == "None":
                 raise ValueError('"chat_handler" cannot be None!')
             
@@ -449,8 +465,8 @@ def strip_think_block(text: str) -> str:
     """Sanitize output text by stripping reasoning <think>...</think> blocks."""
     if not text:
         return ""
-    cleaned = re.sub(r'<think>.*?</think>', '', text, flags=re.DOTALL)
-    cleaned = re.sub(r'<think>.*$', '', cleaned, flags=re.DOTALL)
+    cleaned = THINK_BLOCK_PATTERN.sub('', text)
+    cleaned = THINK_BLOCK_UNCLOSED_PATTERN.sub('', cleaned)
     return cleaned.strip()
 
 def collect_image_inputs(kwargs: dict) -> list:
@@ -641,7 +657,6 @@ class llama_cpp_instruct_adv:
     def process(self, llama_model, preset_prompt, custom_prompt, system_prompt, inference_mode, max_frames, max_size, seed, force_offload, save_states, unique_id, parameters=None, queue_handler=None, **kwargs):
         if not LLAMA_CPP_STORAGE.llm:
             LLAMA_CPP_STORAGE.load_model(llama_model)
-            #raise RuntimeError("The model has been unloaded or failed to load!")
         
         if parameters is None:
             parameters = {}
@@ -687,8 +702,7 @@ class llama_cpp_instruct_adv:
         # Collect all image inputs from image_0..image_7 (and images if provided)
         all_images = collect_image_inputs(kwargs)
 
-        pattern = re.compile(r'(?:<|\[)(?:Picture|image|img)\s*([0-9]\d*)(?:>|\])', re.IGNORECASE)
-        placeholders = list(pattern.finditer(prompt_text))
+        placeholders = list(PLACEHOLDER_PATTERN.finditer(prompt_text))
         has_zero = any(int(m.group(1)) == 0 for m in placeholders)
 
         completion_params = inspect.signature(LLAMA_CPP_STORAGE.llm.create_chat_completion).parameters
@@ -831,7 +845,6 @@ class llama_cpp_instruct_adv:
             
         if save_states:
             print(f"[llama-cpp_vlm] Saving state id={uid}...")
-            #LLAMA_CPP_STORAGE.states[f"{uid}"] = LLAMA_CPP_STORAGE.llm.save_state()
             messages.append({"role": "assistant", "content": out1})
             clear_message = self.sanitize_messages(messages)
             LLAMA_CPP_STORAGE.messages[f"{uid}"] = clear_message
