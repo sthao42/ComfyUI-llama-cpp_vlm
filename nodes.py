@@ -728,6 +728,7 @@ class llama_cpp_instruct_adv:
                         {"type": "text", "text": prompt_text},
                         {"type": "image_url", "image_url": {"url": f"data:image/jpeg;base64,{data}"}}
                     ]
+                    frame_messages = messages + [{"role": "user", "content": frame_user_content}]
                     try:
                         output = LLAMA_CPP_STORAGE.llm.create_chat_completion(messages=frame_messages, seed=seed, **final_params)
                     except Exception as e:
