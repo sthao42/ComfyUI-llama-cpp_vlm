@@ -645,13 +645,26 @@ class llama_cpp_instruct_adv:
     CATEGORY = "llama-cpp-vlm"
     
     def sanitize_messages(self, messages):
-        clean_messages = messages.copy()
-        for msg in clean_messages:
+        clean_messages = []
+        for msg in messages:
+            msg_copy = {"role": msg.get("role", "user")}
             content = msg.get("content")
             if isinstance(content, list):
+                new_content = []
                 for item in content:
                     if isinstance(item, dict) and item.get("type") == "image_url":
-                        item["image_url"]["url"] = "data:image/png;base64,iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAIAAACQd1PeAAAACXBIWXMAAAsTAAALEwEAmpwYAAAADElEQVQImWP4//8/AAX+Av5Y8msOAAAAAElFTkSuQmCC"
+                        new_content.append({
+                            "type": "image_url",
+                            "image_url": {"url": "data:image/png;base64,iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAIAAACQd1PeAAAACXBIWXMAAAsTAAALEwEAmpwYAAAADElEQVQImWP4//8/AAX+Av5Y8msOAAAAAElFTkSuQmCC"}
+                        })
+                    elif isinstance(item, dict):
+                        new_content.append(item.copy())
+                    else:
+                        new_content.append(item)
+                msg_copy["content"] = new_content
+            else:
+                msg_copy["content"] = content
+            clean_messages.append(msg_copy)
         return clean_messages
     
     def process(self, llama_model, preset_prompt, custom_prompt, system_prompt, inference_mode, max_frames, max_size, seed, force_offload, save_states, unique_id, parameters=None, queue_handler=None, **kwargs):
