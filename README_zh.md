@@ -7,11 +7,15 @@
 
 ## 安装步骤
 
+### 📋 环境要求
+> [!IMPORTANT]
+> 本节点套件需要 **`llama-cpp-python` v0.3.46 或更高版本**。预编译的 CUDA 13.0、CUDA 12.8 及 Metal 加速 Wheel 文件可以在 [`JamePeng/llama-cpp-python`](https://github.com/JamePeng/llama-cpp-python) 仓库中获取。
+
 #### 安装节点:
 ```bash
 cd ComfyUI/custom_nodes
-git clone https://github.com/lihaoyun6/ComfyUI-llama-cpp.git
-python -m pip install -r ComfyUI-llama-cpp/requirements.txt
+git clone https://github.com/sthao42/ComfyUI-llama-cpp_vlm.git
+python -m pip install -r ComfyUI-llama-cpp_vlm/requirements.txt
 ```
 
 ### 模型路径:

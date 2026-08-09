@@ -36,6 +36,10 @@ An advanced, high-performance ComfyUI custom node suite for running Large Langua
 
 ## 📦 Installation
 
+### 📋 Requirements
+> [!IMPORTANT]
+> Requires **`llama-cpp-python` v0.3.46 or newer** to function properly. Pre-built wheels with CUDA 13.0, CUDA 12.8, and Metal acceleration can be found at the [`JamePeng/llama-cpp-python`](https://github.com/JamePeng/llama-cpp-python) repository.
+
 ### 1. Clone the repository into ComfyUI custom nodes:
 ```bash
 cd ComfyUI/custom_nodes
