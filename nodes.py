@@ -608,7 +608,7 @@ class llama_cpp_instruct_adv:
                     "step": 64,
                     "tooltip": 'Max size of input images in "images" and "video" modes.'
                 }),
-                "seed": ("INT", {"default": 0, "min": 0, "max": 0xffffffffffffffff, "step": 1, "control_after_generate": True}),
+                "seed": ("INT", {"default": 0, "min": 0, "max": 0x7fffffffffffffff, "step": 1, "control_after_generate": True}),
                 "force_offload": ("BOOLEAN", {
                     "default": False,
                     "tooltip": "Unload the model after inference."
