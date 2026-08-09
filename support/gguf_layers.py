@@ -1,119 +1,101 @@
+from typing import BinaryIO, Optional, Any
 import struct
 
-def read_u32(f):
+# Struct format lookup maps for 1-step binary parsing
+_TYPE_UNPACK_MAP = {
+    0: "<B",   # uint8
+    1: "<b",   # int8
+    2: "<H",   # uint16
+    3: "<h",   # int16
+    4: "<I",   # uint32
+    5: "<i",   # int32
+    6: "<f",   # float32
+    7: "<?",   # bool
+    10: "<Q",  # uint64
+    11: "<q",  # int64
+    12: "<d",  # float64
+}
+
+_TYPE_SIZE_MAP = {
+    0: 1, 1: 1, 2: 2, 3: 2, 4: 4, 5: 4, 6: 4, 7: 1, 10: 8, 11: 8, 12: 8
+}
+
+
+def read_u32(f: BinaryIO) -> int:
     return struct.unpack("<I", f.read(4))[0]
 
 
-def read_u64(f):
+def read_u64(f: BinaryIO) -> int:
     return struct.unpack("<Q", f.read(8))[0]
 
 
-def read_string(f):
-    ln = read_u64(f)
-    return f.read(ln).decode("utf-8")
+def read_string(f: BinaryIO) -> str:
+    length = read_u64(f)
+    return f.read(length).decode("utf-8")
 
 
-def read_value(f):
+def read_value(f: BinaryIO) -> Any:
     vtype = read_u32(f)
 
-    # GGUF value types
-    if vtype == 0:   # uint8
-        return struct.unpack("<B", f.read(1))[0]
-    if vtype == 1:   # int8
-        return struct.unpack("<b", f.read(1))[0]
-    if vtype == 2:   # uint16
-        return struct.unpack("<H", f.read(2))[0]
-    if vtype == 3:   # int16
-        return struct.unpack("<h", f.read(2))[0]
-    if vtype == 4:   # uint32
-        return struct.unpack("<I", f.read(4))[0]
-    if vtype == 5:   # int32
-        return struct.unpack("<i", f.read(4))[0]
-    if vtype == 6:   # float32
-        return struct.unpack("<f", f.read(4))[0]
-    if vtype == 7:   # bool
-        return struct.unpack("<?", f.read(1))[0]
+    if vtype in _TYPE_UNPACK_MAP:
+        return struct.unpack(_TYPE_UNPACK_MAP[vtype], f.read(_TYPE_SIZE_MAP[vtype]))[0]
     if vtype == 8:   # string
         return read_string(f)
     if vtype == 9:   # array
         atype = read_u32(f)
         count = read_u64(f)
         return [read_value_of_type(f, atype) for _ in range(count)]
-    if vtype == 10:  # uint64
-        return struct.unpack("<Q", f.read(8))[0]
-    if vtype == 11:  # int64
-        return struct.unpack("<q", f.read(8))[0]
-    if vtype == 12:  # float64
-        return struct.unpack("<d", f.read(8))[0]
 
-    raise ValueError(f"Unknown value type {vtype}")
+    raise ValueError(f"Unknown GGUF value type {vtype}")
 
 
-def read_value_of_type(f, atype):
-    # same mapping as above but without extra type code
-    if atype == 0:
-        return struct.unpack("<B", f.read(1))[0]
-    if atype == 1:
-        return struct.unpack("<b", f.read(1))[0]
-    if atype == 2:
-        return struct.unpack("<H", f.read(2))[0]
-    if atype == 3:
-        return struct.unpack("<h", f.read(2))[0]
-    if atype == 4:
-        return struct.unpack("<I", f.read(4))[0]
-    if atype == 5:
-        return struct.unpack("<i", f.read(4))[0]
-    if atype == 6:
-        return struct.unpack("<f", f.read(4))[0]
-    if atype == 7:
-        return struct.unpack("<?", f.read(1))[0]
+def read_value_of_type(f: BinaryIO, atype: int) -> Any:
+    if atype in _TYPE_UNPACK_MAP:
+        return struct.unpack(_TYPE_UNPACK_MAP[atype], f.read(_TYPE_SIZE_MAP[atype]))[0]
     if atype == 8:
         return read_string(f)
-    if atype == 10:
-        return struct.unpack("<Q", f.read(8))[0]
-    if atype == 11:
-        return struct.unpack("<q", f.read(8))[0]
-    if atype == 12:
-        return struct.unpack("<d", f.read(8))[0]
 
-    raise ValueError(f"Unknown array item type {atype}")
+    raise ValueError(f"Unknown GGUF array item type {atype}")
 
-def get_layer_count(path):
+
+def get_layer_count(path: str) -> Optional[int]:
+    """Parse GGUF metadata to extract block_count/layer_count without external dependencies."""
     try:
         with open(path, "rb") as f:
-            if f.read(4) != b"GGUF":
-                raise ValueError("This is not a GGUF file!")
-                
-            version = read_u32(f)
-            tensor_count = read_u64(f)
+            magic = f.read(4)
+            if magic != b"GGUF":
+                raise ValueError("Not a valid GGUF binary file.")
+
+            _version = read_u32(f)
+            _tensor_count = read_u64(f)
             kv_count = read_u64(f)
             meta = {}
-            
+
             for _ in range(kv_count):
                 key = read_string(f)
                 value = read_value(f)
                 meta[key] = value
-                
+
         for k, v in meta.items():
             if k.lower().endswith(".block_count"):
-                return v
-    except Exception as e:
+                return int(v)
+    except Exception:
         pass
-    
+
     try:
         from gguf import GGUFReader
         reader = GGUFReader(path)
-        
-        layer_count = reader.get_field("llama.block_count") 
+
+        layer_count = reader.get_field("llama.block_count")
         if layer_count is None:
             for field in reader.fields.values():
                 if field.name.endswith(".block_count"):
                     layer_count = field.parts[field.data[0]]
                     break
-                
+
         if layer_count:
             return int(layer_count[0] if isinstance(layer_count, list) else layer_count)
     except Exception as e:
         print(f"[llama-cpp_vlm] Failed to get block_count: {e}")
-        
-    return None
+
+    return None

@@ -1,14 +1,70 @@
+import os
 import sys
+import types
 import unittest
 import torch
 import numpy as np
 
-# Ensure ComfyUI and node modules are in sys.path
-sys.path.insert(0, r'G:\ComfyUI_windows_portable\ComfyUI')
-sys.path.insert(0, 'd:/')
+# Dynamic path resolution: add project root directory to sys.path
+REPO_ROOT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
+if REPO_ROOT not in sys.path:
+    sys.path.insert(0, REPO_ROOT)
 
-import importlib
-nodes = importlib.import_module('ComfyUI-llama-cpp_vlm.nodes')
+# Mock external ComfyUI and llama_cpp dependencies if running outside ComfyUI environment
+if "folder_paths" not in sys.modules:
+    fp = types.ModuleType("folder_paths")
+    fp.models_dir = os.path.join(REPO_ROOT, "models")
+    fp.folder_names_and_paths = {}
+    fp.get_filename_list = lambda x: []
+    sys.modules["folder_paths"] = fp
+
+if "comfy" not in sys.modules:
+    comfy = types.ModuleType("comfy")
+    mm = types.ModuleType("comfy.model_management")
+    mm.processing_interrupted = lambda: False
+    mm.InterruptProcessingException = Exception
+    mm.unload_all_models = lambda: None
+    mm.soft_empty_cache = lambda: None
+    comfy.model_management = mm
+
+    utils = types.ModuleType("comfy.utils")
+    class DummyProgressBar:
+        def __init__(self, total=None): self.total = total
+        def update(self, n=1): pass
+    utils.ProgressBar = DummyProgressBar
+    comfy.utils = utils
+
+    sys.modules["comfy"] = comfy
+    sys.modules["comfy.model_management"] = mm
+    sys.modules["comfy.utils"] = utils
+
+if "llama_cpp" not in sys.modules:
+    llama_cpp = types.ModuleType("llama_cpp")
+    class DummyLlama:
+        def __init__(self, **kwargs): pass
+        def close(self): pass
+        def create_chat_completion(self, **kwargs):
+            return {"choices": [{"message": {"content": "Mock completion response"}}]}
+    llama_cpp.Llama = DummyLlama
+
+    chat_fmt = types.ModuleType("llama_cpp.llama_chat_format")
+    class DummyHandler:
+        def __init__(self, **kwargs): pass
+    for h_name in [
+        "Llava15ChatHandler", "Llava16ChatHandler", "MoondreamChatHandler",
+        "NanoLlavaChatHandler", "Llama3VisionAlphaChatHandler", "MiniCPMv26ChatHandler",
+        "MTMDChatHandler", "Gemma3ChatHandler", "Gemma4ChatHandler",
+        "Qwen25VLChatHandler", "Qwen3VLChatHandler", "Qwen35ChatHandler",
+        "GLM46VChatHandler", "LFM2VLChatHandler", "GLM41VChatHandler",
+        "LFM25VLChatHandler", "GraniteDoclingChatHandler", "MiniCPMv45ChatHandler",
+        "MiniCPMv46ChatHandler", "PaddleOCRChatHandler", "Qwen3ASRChatHandler", "Step3VLChatHandler"
+    ]:
+        setattr(chat_fmt, h_name, DummyHandler)
+    llama_cpp.llama_chat_format = chat_fmt
+    sys.modules["llama_cpp"] = llama_cpp
+    sys.modules["llama_cpp.llama_chat_format"] = chat_fmt
+
+import nodes
 
 class TestComfyUILlamaCppVLM(unittest.TestCase):
 
@@ -23,11 +79,10 @@ class TestComfyUILlamaCppVLM(unittest.TestCase):
 
     def test_parameters_node_processing(self):
         params_node = nodes.llama_cpp_parameters()
-        # Test stop word split & advanced sampler filtering
         raw = {
             "max_tokens": 2048,
             "stop": "###, \\n\\n, User:",
-            "reasoning_budget": -1  # Should be popped
+            "reasoning_budget": -1
         }
         res = params_node.process(**raw)[0]
         self.assertEqual(res["stop"], ["###", "\n\n", "User:"])
@@ -42,50 +97,46 @@ class TestComfyUILlamaCppVLM(unittest.TestCase):
         self.assertNotIn('video_1', optional_keys)
 
     def test_scale_image_safety(self):
-        # Test 4D tensor [1, 256, 256, 3]
         tensor_4d = torch.zeros(1, 256, 256, 3)
         res_4d = nodes.scale_image(tensor_4d, max_size=128)
         self.assertEqual(res_4d.shape, (128, 128, 3))
 
-        # Test 3D tensor [256, 256, 3]
         tensor_3d = torch.zeros(256, 256, 3)
         res_3d = nodes.scale_image(tensor_3d, max_size=128)
         self.assertEqual(res_3d.shape, (128, 128, 3))
 
-        # Test 2D / 1-channel tensor [256, 256]
         tensor_2d = torch.zeros(256, 256)
         res_2d = nodes.scale_image(tensor_2d, max_size=128)
         self.assertEqual(res_2d.shape, (128, 128, 3))
 
     def test_think_block_stripping(self):
-        # We simulate the strip_think_block logic
-        import re
-        def strip_think_block(text: str) -> str:
-            if not text:
-                return ""
-            cleaned = re.sub(r'<think>.*?</think>', '', text, flags=re.DOTALL)
-            cleaned = re.sub(r'<think>.*$', '', cleaned, flags=re.DOTALL)
-            return cleaned.strip()
-
         sample_closed = "<think>\nInternal reasoning steps...\n</think>\nA red car on a sunny street."
-        self.assertEqual(strip_think_block(sample_closed), "A red car on a sunny street.")
+        self.assertEqual(nodes.strip_think_block(sample_closed), "A red car on a sunny street.")
 
         sample_unclosed = "<think>\nGeneration cut off during thinking..."
-        self.assertEqual(strip_think_block(sample_unclosed), "")
+        self.assertEqual(nodes.strip_think_block(sample_unclosed), "")
 
     def test_seed_sanitization_and_is_changed(self):
         inst = nodes.llama_cpp_instruct_adv()
         import math
-        # Random seed -1 -> NaN in IS_CHANGED
         self.assertTrue(math.isnan(inst.IS_CHANGED(None, "", "", "", "batch", 1, 256, -1, False, False, None)))
-        # Fixed seed -> deterministic string in IS_CHANGED
         self.assertEqual(inst.IS_CHANGED(None, "", "", "", "batch", 1, 256, 42, False, True, None), "42_True")
-        # sanitize_seed protects against LLAMA_DEFAULT_SEED (0xFFFFFFFF)
         self.assertEqual(inst.sanitize_seed(0xFFFFFFFF), 0xFFFFFFFF - 1)
-        # 64-bit seed bounds
         self.assertEqual(inst.sanitize_seed(0xFFFFFFFFFFFFFFFF), 0xFFFFFFFF - 1)
-        # Frame offset calculation
         self.assertEqual(inst.sanitize_seed(50, offset=5), 55)
+
+    def test_gaussian_filter_2d_native(self):
+        arr = np.zeros((20, 20), dtype=np.float32)
+        arr[10, 10] = 1.0
+        blurred = nodes.gaussian_filter_2d(arr, sigma=2.0)
+        self.assertEqual(blurred.shape, (20, 20))
+        self.assertTrue(blurred[10, 10] < 1.0)
+        self.assertTrue(blurred[10, 10] > 0.0)
+
+    def test_parse_json_robustness(self):
+        json_raw = "```json\n{\"bbox_2d\": [10, 20, 30, 40], \"label\": \"dog\"}\n```"
+        parsed = nodes.parse_json(json_raw)
+        self.assertEqual(parsed["label"], "dog")
 
 if __name__ == '__main__':
     unittest.main()

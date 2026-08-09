@@ -10,10 +10,14 @@ import torch
 
 import numpy as np
 from PIL import Image, ImageDraw
-from scipy.ndimage import gaussian_filter
-from .support.cqdm import cqdm
-from .support.gguf_layers import get_layer_count
-from .support.prompt_enhancer_preset import *
+try:
+    from .support.cqdm import cqdm
+    from .support.gguf_layers import get_layer_count
+    from .support import prompt_enhancer_preset as preset_mod
+except ImportError:
+    from support.cqdm import cqdm
+    from support.gguf_layers import get_layer_count
+    from support import prompt_enhancer_preset as preset_mod
 
 import folder_paths
 import comfy.model_management as mm
@@ -37,6 +41,26 @@ chat_handlers = ["None", "LLaVA-1.5", "LLaVA-1.6", "Moondream2", "nanoLLaVA", "l
 PLACEHOLDER_PATTERN = re.compile(r'(?:<|\[)(?:Picture|image|img)\s*([0-9]\d*)(?:>|\])', re.IGNORECASE)
 THINK_BLOCK_PATTERN = re.compile(r'<think>.*?</think>', re.DOTALL)
 THINK_BLOCK_UNCLOSED_PATTERN = re.compile(r'<think>.*$', re.DOTALL)
+JSON_CODEBLOCK_PATTERN = re.compile(r'^```(?:json)?\s*|\s*```$', re.IGNORECASE | re.MULTILINE)
+
+def gaussian_filter_2d(image_array: np.ndarray, sigma: float) -> np.ndarray:
+    """Apply 2D Gaussian blur filter on a NumPy float32 array without scipy dependency."""
+    if sigma <= 0:
+        return image_array
+    try:
+        from scipy.ndimage import gaussian_filter
+        return gaussian_filter(image_array, sigma=sigma)
+    except ImportError:
+        radius = int(round(3.0 * sigma))
+        if radius < 1:
+            return image_array
+        x = np.arange(-radius, radius + 1, dtype=np.float32)
+        kernel = np.exp(-0.5 * (x / sigma) ** 2)
+        kernel /= kernel.sum()
+
+        res = np.apply_along_axis(lambda m: np.convolve(m, kernel, mode='same'), axis=0, arr=image_array)
+        res = np.apply_along_axis(lambda m: np.convolve(m, kernel, mode='same'), axis=1, arr=res)
+        return res.astype(np.float32)
 
 def get_safe_model_path(base_dir: str, filename: str) -> str:
     """Validate and sanitize model filenames against directory traversal attacks."""
@@ -54,37 +78,37 @@ if _MTMD:
 try:
     from llama_cpp.llama_chat_format import Gemma3ChatHandler
     chat_handlers += ["Gemma3"]
-except:
+except Exception:
     Gemma3ChatHandler = None
-    
+
 try:
     from llama_cpp.llama_chat_format import Gemma4ChatHandler
     chat_handlers += ["Gemma4", "Gemma4-Thinking"]
-except:
+except Exception:
     Gemma4ChatHandler = None
 
 try:
     from llama_cpp.llama_chat_format import Qwen25VLChatHandler
     chat_handlers += ["Qwen2.5-VL", "MinerU2.5-Pro"]
-except:
+except Exception:
     Qwen25VLChatHandler = None
 
 try:
     from llama_cpp.llama_chat_format import Qwen3VLChatHandler
     chat_handlers += ["Qwen3-VL", "Qwen3-VL-Thinking"]
-except:
+except Exception:
     Qwen3VLChatHandler = None
-    
+
 try:
     from llama_cpp.llama_chat_format import Qwen35ChatHandler
     chat_handlers += ["Qwen3.5", "Qwen3.5-Thinking", "Qwen3.6", "Qwen3.6-Thinking"]
-except:
+except Exception:
     Qwen35ChatHandler = None
-    
+
 try:
     from llama_cpp.llama_chat_format import (GLM46VChatHandler, LFM2VLChatHandler, GLM41VChatHandler)
     chat_handlers += ["GLM-4.6V", "GLM-4.6V-Thinking", "GLM-4.1V-Thinking", "LFM2-VL"]
-except:
+except Exception:
     GLM46VChatHandler = None
     LFM2VLChatHandler = None
     GLM41VChatHandler = None
@@ -92,43 +116,43 @@ except:
 try:
     from llama_cpp.llama_chat_format import LFM25VLChatHandler
     chat_handlers += ["LFM2.5-VL"]
-except:
+except Exception:
     LFM25VLChatHandler = None
-    
+
 try:
     from llama_cpp.llama_chat_format import GraniteDoclingChatHandler
     chat_handlers += ["Granite-Docling"]
-except:
+except Exception:
     GraniteDoclingChatHandler = None
-    
+
 try:
     from llama_cpp.llama_chat_format import MiniCPMv45ChatHandler
     chat_handlers += ["MiniCPM-v4.5", "MiniCPM-v4.5-Thinking"]
-except:
+except Exception:
     MiniCPMv45ChatHandler = None
-    
+
 try:
     from llama_cpp.llama_chat_format import MiniCPMv46ChatHandler
     chat_handlers += ["MiniCPM-v4.6", "MiniCPM-v4.6-Thinking"]
-except:
+except Exception:
     MiniCPMv46ChatHandler = None
-    
+
 try:
     from llama_cpp.llama_chat_format import PaddleOCRChatHandler
     chat_handlers += ["PaddleOCR-VL-1.5"]
-except:
+except Exception:
     PaddleOCRChatHandler = None
-    
+
 try:
     from llama_cpp.llama_chat_format import Qwen3ASRChatHandler
     chat_handlers += ["Qwen3-ASR"]
-except:
+except Exception:
     Qwen3ASRChatHandler = None
-    
+
 try:
     from llama_cpp.llama_chat_format import Step3VLChatHandler
     chat_handlers += ["Step3-VL"]
-except:
+except Exception:
     Step3VLChatHandler = None
 
 class AnyType(str):
@@ -143,32 +167,35 @@ class LLAMA_CPP_STORAGE:
     sys_prompts = {}
 
     @classmethod
-    def clean_state(cls, id=-1):
-        if id == -1:
+    def clean_state(cls, state_id: int = -1, **kwargs):
+        target_id = kwargs.get("id", state_id)
+        if target_id == -1:
             cls.messages.clear()
             cls.sys_prompts.clear()
         else:
-            cls.messages.pop(f"{id}", None)
-            cls.sys_prompts.pop(f"{id}", None)
-        
+            cls.messages.pop(f"{target_id}", None)
+            cls.sys_prompts.pop(f"{target_id}", None)
+
     @classmethod
-    def clean(cls, all=False):
-        try:
-            cls.llm.close()
-        except Exception:
-            pass
-            
-        try:
-            cls.chat_handler._exit_stack.close()
-        except Exception:
-            pass
-        
+    def clean(cls, clear_all: bool = False):
+        if cls.llm is not None:
+            try:
+                cls.llm.close()
+            except Exception:
+                pass
+
+        if cls.chat_handler is not None and hasattr(cls.chat_handler, "_exit_stack"):
+            try:
+                cls.chat_handler._exit_stack.close()
+            except Exception:
+                pass
+
         cls.llm = None
         cls.chat_handler = None
         cls.current_config = None
-        if all:
+        if clear_all:
             cls.clean_state()
-        
+
         gc.collect()
         mm.soft_empty_cache()
     
@@ -225,7 +252,7 @@ class LLAMA_CPP_STORAGE:
                 case _:
                     raise ValueError(f'Unknown model type: "{chat_handler}"')
         
-        cls.clean(all=True)
+        cls.clean(clear_all=True)
         cls.current_config = config.copy()
         model = config["model"]
         mmproj = config["mmproj"]
@@ -350,7 +377,7 @@ any_type = AnyType("*")
 if not hasattr(mm, "unload_all_models_backup"):
     mm.unload_all_models_backup = mm.unload_all_models
     def patched_unload_all_models(*args, **kwargs):
-        LLAMA_CPP_STORAGE.clean(all=True)
+        LLAMA_CPP_STORAGE.clean(clear_all=True)
         result = mm.unload_all_models_backup(*args, **kwargs)
         return result
     mm.unload_all_models = patched_unload_all_models
@@ -383,8 +410,10 @@ def image2base64(image):
     img_base64 = base64.b64encode(buffered.getvalue()).decode('utf-8')
     return img_base64
 
-def parse_json(json_str):
-    json_output = json_str.strip().removeprefix("```json").removesuffix("```")
+def parse_json(json_str: str):
+    if not json_str:
+        raise ValueError("JSON string is empty.")
+    json_output = JSON_CODEBLOCK_PATTERN.sub("", json_str.strip())
     try:
         parsed = json.loads(json_output)
     except Exception as e:
@@ -708,7 +737,7 @@ class llama_cpp_instruct_adv:
         system_prompts = "请将输入的图片序列当做视频而不是静态帧序列, " + system_prompt if video_input else system_prompt
         if last_sys_prompt != system_prompts:
             messages = []
-            LLAMA_CPP_STORAGE.clean_state(id=uid)
+            LLAMA_CPP_STORAGE.clean_state(state_id=uid)
             LLAMA_CPP_STORAGE.sys_prompts[f"{uid}"] = system_prompts
             if system_prompts.strip():
                 messages.append({"role": "system", "content": system_prompts})
@@ -1136,7 +1165,7 @@ class bbox_to_segs:
             local_mask_np[local_y1:local_y2, local_x1:local_x2] = 1.0
             
             if feather > 0:
-                local_mask_np = gaussian_filter(local_mask_np, sigma=feather)
+                local_mask_np = gaussian_filter_2d(local_mask_np, sigma=feather)
                 
             cropped_mask_np = local_mask_np
             cropped_img_padded = torch.zeros((crop_h, crop_w, 3), dtype=image.dtype, device=image.device)
@@ -1220,17 +1249,18 @@ class bbox_to_mask:
             local_mask_np[local_y1:local_y2, local_x1:local_x2] = 1.0
             
             if feather > 0:
-                local_mask_np = gaussian_filter(local_mask_np, sigma=feather)
+                local_mask_np = gaussian_filter_2d(local_mask_np, sigma=feather)
                 
             current_full_mask_np = np.zeros(mask_shape, dtype=np.float32)
             x1_c, y1_c = max(0, x1_exp), max(0, y1_exp)
             x2_c, y2_c = min(width, x2_exp), min(height, y2_exp)
             
             if x2_c > x1_c and y2_c > y1_c:
-                current_full_mask_np[y1_c:y2_c, x1_c:x2_c] = 1.0
-                
-            if feather > 0:
-                current_full_mask_np = gaussian_filter(current_full_mask_np, sigma=feather)
+                dst_x1 = x1_c - x1_exp
+                dst_y1 = y1_c - y1_exp
+                dst_x2 = dst_x1 + (x2_c - x1_c)
+                dst_y2 = dst_y1 + (y2_c - y1_c)
+                current_full_mask_np[y1_c:y2_c, x1_c:x2_c] = local_mask_np[dst_y1:dst_y2, dst_x1:dst_x2]
                 
             current_full_mask_tensor = torch.from_numpy(current_full_mask_np).to(image.device)
             combined_full_mask = torch.maximum(combined_full_mask, current_full_mask_tensor)
@@ -1266,6 +1296,7 @@ class bboxes_to_bbox:
         return (bboxes[image_index],)
 
 # from: https://github.com/crystian/ComfyUI-Crystools
+# from: https://github.com/crystian/ComfyUI-Crystools
 class parse_json_node:
     @classmethod
     def INPUT_TYPES(s):
@@ -1288,49 +1319,47 @@ class parse_json_node:
         if isinstance(input, str):
             input = [input]
             
-        result = {}
-        for i, json in enumerate(input):
-            val = ""
+        res_any, res_string, res_int, res_float, res_boolean = [], [], [], [], []
+        for json_str in input:
             if key is not None and key != "":
-                val = get_nested_value(json.strip().removeprefix("```json").removesuffix("```"), key, default)
+                cleaned = JSON_CODEBLOCK_PATTERN.sub("", json_str.strip())
+                val = get_nested_value(cleaned, key, default)
             else:
                 raise ValueError("Key cannot be empty!")
             
-            result["any"][i] = val
+            res_any.append(val)
             try:
-                result["string"][i] = str(val)
-            except Exception as e:
-                result["string"][i] = val
+                res_string.append(str(val))
+            except Exception:
+                res_string.append(val)
             
             try:
-                result["int"][i] = int(val)
-            except Exception as e:
-                result["int"][i] = val
+                res_int.append(int(val))
+            except Exception:
+                res_int.append(val)
             
             try:
-                result["float"][i] = float(val)
-            except Exception as e:
-                result["float"][i] = val
+                res_float.append(float(val))
+            except Exception:
+                res_float.append(val)
             
             try:
-                result["boolean"][i] = val.lower() == "true"
-            except Exception as e:
-                result["boolean"][i] = val
+                res_boolean.append(str(val).lower() == "true")
+            except Exception:
+                res_boolean.append(val)
                 
-        if len(result["any"]) == 1:
-            result["any"] = result["any"][0]
-            result["string"] = result["string"][0]
-            result["int"] = result["int"][0]
-            result["float"] = result["float"][0]
-            result["boolean"] = result["boolean"][0]
-        
-        return (result["any"], result["string"], result["int"], result["float"], result["boolean"])
+        if len(res_any) == 1:
+            return (res_any[0], res_string[0], res_int[0], res_float[0], res_boolean[0])
+        return (res_any, res_string, res_int, res_float, res_boolean)
 
 def get_nested_value(data, dotted_key, default=None):
     keys = dotted_key.split('.')
     for key in keys:
         if isinstance(data, str):
+            try:
                 data = json.loads(data)
+            except Exception:
+                return default
         if isinstance(data, dict) and key in data:
             data = data[key]
         else:
@@ -1354,23 +1383,45 @@ class remove_code_block:
     FUNCTION = "process"
     CATEGORY = "llama-cpp-vlm"
     
-    def process(self, input, label):
+    def process(self, input, label=None):
         if isinstance(input, str):
             input = [input]
         
         output = []
+        pattern = re.compile(rf"^```(?:{re.escape(label)})?\s*|\s*```$", re.IGNORECASE) if label else JSON_CODEBLOCK_PATTERN
         for value in input:
-            output.append(value.strip().removeprefix(f"```{label}").removesuffix("```"))
+            output.append(pattern.sub("", value.strip()))
         if len(output) == 1:
             return (output[0],)
         return (output,)
+
+PRESET_LOOKUP = {
+    "Qwen-Image [EN]": getattr(preset_mod, "QWEN_IMAGE_EN", ""),
+    "Qwen-Image [ZH]": getattr(preset_mod, "QWEN_IMAGE_ZH", ""),
+    "Qwen-Image 2512 [EN]": getattr(preset_mod, "QWEN_IMAGE_2512_EN", ""),
+    "Qwen-Image 2512 [ZH]": getattr(preset_mod, "QWEN_IMAGE_2512_ZH", ""),
+    "Qwen-Image-Edit": getattr(preset_mod, "QWEN_IMAGE_EDIT", ""),
+    "Qwen-Image-Edit 2509": getattr(preset_mod, "QWEN_IMAGE_EDIT_2509", ""),
+    "Qwen-Image-Edit 2511": getattr(preset_mod, "QWEN_IMAGE_EDIT_2511", ""),
+    "Z-Image Turbo": getattr(preset_mod, "ZIMAGE_TURBO", ""),
+    "Flux.2 T2I": getattr(preset_mod, "FLUX2_T2I", ""),
+    "Flux.2 I2I": getattr(preset_mod, "FLUX2_I2I", ""),
+    "Wan T2V [EN]": getattr(preset_mod, "WAN_T2V_EN", ""),
+    "Wan T2V [ZH]": getattr(preset_mod, "WAN_T2V_ZH", ""),
+    "Wan I2V [EN]": getattr(preset_mod, "WAN_I2V_EN", ""),
+    "Wan I2V [ZH]": getattr(preset_mod, "WAN_I2V_ZH", ""),
+    "Wan I2V Full-Auto [EN]": getattr(preset_mod, "WAN_I2V_EMPTY_EN", ""),
+    "Wan I2V Full-Auto [ZH]": getattr(preset_mod, "WAN_I2V_EMPTY_ZH", ""),
+    "Wan FLF2V [EN]": getattr(preset_mod, "WAN_FLF2V_EN", ""),
+    "Wan FLF2V [ZH]": getattr(preset_mod, "WAN_FLF2V_ZH", ""),
+}
 
 class PromptEnhancerPreset:
     @classmethod
     def INPUT_TYPES(s):
         return {
             "required": {
-                "preset": (["Qwen-Image [EN]", "Qwen-Image [ZH]", "Qwen-Image 2512 [EN]", "Qwen-Image 2512 [ZH]", "Qwen-Image-Edit", "Qwen-Image-Edit 2509", "Qwen-Image-Edit 2511", "Z-Image Turbo", "Flux.2 T2I", "Flux.2 I2I", "Wan T2V [EN]", "Wan T2V [ZH]", "Wan I2V [EN]", "Wan I2V [ZH]", "Wan I2V Full-Auto [EN]", "Wan I2V Full-Auto [ZH]", "Wan FLF2V [EN]", "Wan FLF2V [ZH]"], )
+                "preset": (list(PRESET_LOOKUP.keys()),)
             }
         }
     
@@ -1380,45 +1431,9 @@ class PromptEnhancerPreset:
     CATEGORY = "llama-cpp-vlm"
     
     def main(self, preset):
-        match preset:
-            case "Qwen-Image [EN]":
-                return (QWEN_IMAGE_EN,)
-            case "Qwen-Image [ZH]":
-                return (QWEN_IMAGE_ZH,)
-            case "Qwen-Image 2512 [EN]":
-                return (QWEN_IMAGE_2512_EN,)
-            case "Qwen-Image 2512 [ZH]":
-                return (QWEN_IMAGE_2512_ZH,)
-            case "Qwen-Image-Edit":
-                return (QWEN_IMAGE_EDIT,)
-            case "Qwen-Image-Edit 2509":
-                return (QWEN_IMAGE_EDIT_2509,)
-            case "Qwen-Image-Edit 2511":
-                return (QWEN_IMAGE_EDIT_2511,)
-            case "Z-Image Turbo":
-                return (ZIMAGE_TURBO,)
-            case "Flux.2 T2I":
-                return (FLUX2_T2I,)
-            case "Flux.2 I2I":
-                return (FLUX2_I2I,)
-            case "Wan T2V [EN]":
-                return (WAN_T2V_EN,)
-            case "Wan T2V [ZH]":
-                return (WAN_T2V_ZH,)
-            case "Wan I2V [EN]":
-                return (WAN_I2V_EN,)
-            case "Wan I2V [ZH]":
-                return (WAN_I2V_ZH,)
-            case "Wan I2V Full-Auto [EN]":
-                return (WAN_I2V_EMPTY_EN,)
-            case "Wan I2V Full-Auto [ZH]":
-                return (WAN_I2V_EMPTY_ZH,)
-            case "Wan FLF2V [EN]":
-                return (WAN_FLF2V_EN,)
-            case "Wan FLF2V [ZH]":
-                return (WAN_FLF2V_ZH,)
-            case _:
-                raise ValueError(f'Unknown preset: "{preset}"')
+        if preset in PRESET_LOOKUP:
+            return (PRESET_LOOKUP[preset],)
+        raise ValueError(f'Unknown preset: "{preset}"')
         
 NODE_CLASS_MAPPINGS = {
     "llama_cpp_model_loader": llama_cpp_model_loader,
