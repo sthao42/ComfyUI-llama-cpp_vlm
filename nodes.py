@@ -608,7 +608,7 @@ class llama_cpp_instruct_adv:
                     "step": 64,
                     "tooltip": 'Max size of input images in "images" and "video" modes.'
                 }),
-                "seed": ("INT", {"default": 0, "min": 0, "max": 0xffffffffffffffff, "step": 1}),
+                "seed": ("INT", {"default": 0, "min": 0, "max": 0xffffffffffffffff, "step": 1, "control_after_generate": True}),
                 "force_offload": ("BOOLEAN", {
                     "default": False,
                     "tooltip": "Unload the model after inference."
@@ -655,6 +655,11 @@ class llama_cpp_instruct_adv:
         return clean_messages
     
     def process(self, llama_model, preset_prompt, custom_prompt, system_prompt, inference_mode, max_frames, max_size, seed, force_offload, save_states, unique_id, parameters=None, queue_handler=None, **kwargs):
+        if seed is None or seed == -1:
+            seed = random.randint(0, 0x7fffffff)
+        else:
+            seed = int(seed) & 0xFFFFFFFF
+
         if not LLAMA_CPP_STORAGE.llm:
             LLAMA_CPP_STORAGE.load_model(llama_model)
         
