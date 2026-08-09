@@ -8,8 +8,8 @@ An advanced, high-performance ComfyUI custom node suite for running Large Langua
 
 ## 🌟 Key Features in This Fork
 
-### 🖼️ Dynamic Multi-Image & Tagging Workflows
-* **Auto-Expanding Input Sockets (`image_0`, `image_1`, ...):** Starts clean with a single `image_0` socket. As you connect `Load Image` nodes, sockets dynamically expand up to `image_8`, automatically pruning unlinked trailing ports when disconnected.
+### 🖼️ Multi-Image & Video Tagging Workflows
+* **Dedicated Image & Video Sockets (`image_0`..`image_8`, `video_0`):** Features 9 reference image input sockets (`image_0` through `image_8`) and a dedicated video input socket (`video_0`). Declared natively in Python for 100% UI canvas stability and reliable workflow loading across all ComfyUI versions.
 * **Inline Tagging & Placeholder Interleaving:** Reference specific images directly in your custom or system prompts using tags like `<Picture 0>`, `<Picture 1>`, `<image_0>`, `<image_1>`, etc. The node automatically places base64 visual payload tokens at the exact placeholder positions.
 * **Multi-Image Preset Prompts:** Includes built-in prompts for multi-image visual comparison, difference analysis, and text-to-video / image reference generation.
 
