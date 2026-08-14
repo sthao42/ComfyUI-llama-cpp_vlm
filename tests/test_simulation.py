@@ -158,14 +158,14 @@ class TestEndToEndSimulation(unittest.TestCase):
         self.assertEqual(sanitized_frame, 103)
         print("[OK] Seed control sanitization & IS_CHANGED caching tests passed.")
 
-        # 7. Test Qwen3.8 / Qwen3.8-27B Chat Handler Resolution
+        # 7. Test Qwen3.8 Chat Handler Resolution
         orig_init = nodes.Llama.__init__
         try:
             nodes.Llama.__init__ = lambda self, **kwargs: None
             cfg_qwen = loader.loadmodel(
                 model="qwen3.8-27b.gguf",
                 mmproj="None",
-                chat_handler="Qwen3.8-27B",
+                chat_handler="Qwen3.8",
                 n_ctx=16384,
                 vram_limit=-1,
                 image_min_tokens=0,
@@ -180,9 +180,9 @@ class TestEndToEndSimulation(unittest.TestCase):
             )[0]
         finally:
             nodes.Llama.__init__ = orig_init
-        self.assertEqual(cfg_qwen["chat_handler"], "Qwen3.8-27B")
-        self.assertEqual(nodes.LLAMA_CPP_STORAGE.current_config["chat_handler"], "Qwen3.8-27B")
-        print("[OK] Qwen3.8-27B handler loading and model configuration tests passed.")
+        self.assertEqual(cfg_qwen["chat_handler"], "Qwen3.8")
+        self.assertEqual(nodes.LLAMA_CPP_STORAGE.current_config["chat_handler"], "Qwen3.8")
+        print("[OK] Qwen3.8 handler loading and model configuration tests passed.")
 
 
 if __name__ == '__main__':

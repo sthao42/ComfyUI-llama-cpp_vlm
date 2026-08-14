@@ -15,7 +15,7 @@ An advanced, high-performance ComfyUI custom node suite for running Large Langua
 
 ### 🤖 Broad VLM & LLM Model Support
 * **Google Gemma 4 (12B & 31B):** Native support for `Gemma4` and `Gemma4-Thinking` with automatic non-causal attention batching (`n_ubatch >= 2048`) to prevent `llama.cpp` assertion crashes.
-* **Qwen 3.8, Qwen 3.6 & Qwen 3.5 Series:** Full support for `Qwen3.8` / `Qwen3.8-27B` (including `Qwen3.8-Thinking` and `Qwen3.8-27B-Thinking`), `Qwen3.6`, `Qwen3.6-Thinking`, `Qwen3.5`, `Qwen3.5-Thinking`, `Qwen3-VL`, `Qwen3-VL-Thinking`, and `Qwen2.5-VL` with hybrid context cache clearing.
+* **Qwen 3.8, Qwen 3.6 & Qwen 3.5 Series:** Full support for `Qwen3.8`, `Qwen3.8-Thinking`, `Qwen3.6`, `Qwen3.6-Thinking`, `Qwen3.5`, `Qwen3.5-Thinking`, `Qwen3-VL`, `Qwen3-VL-Thinking`, and `Qwen2.5-VL` with hybrid context cache clearing.
 * **OCR & Specialized Handlers:** Support for `DeepSeek-OCR`, `MinerU2.5-Pro`, `MiniCPM-v4.5 / v4.6`, `PaddleOCR-VL-1.5`, `Qwen3-ASR`, `Step3-VL`, `GLM-4.6V`, `LFM2.5-VL`, `Granite-Docling`, and more.
 
 ### ⚡ Performance & Long-Context Optimizations
@@ -73,7 +73,7 @@ python -m pip install -r ComfyUI-llama-cpp_vlm/requirements.txt
 ### `llama_cpp_parameters`
 * **`max_tokens`**: Maximum generated tokens (default: `4096`, set `-1` for uncapped generation).
 * **`stop`**: Comma-separated list of phrases to halt generation instantly (e.g. `"###, \n\n"`).
-* **`reasoning_budget`**: Max token budget for thinking models (`Gemma4-Thinking`, `Qwen3.8-Thinking`, `Qwen3.8-27B-Thinking`, `Qwen3.6-Thinking`).
+* **`reasoning_budget`**: Max token budget for thinking models (`Gemma4-Thinking`, `Qwen3.8-Thinking`, `Qwen3.6-Thinking`).
 * **`temperature`**, **`top_p`**, **`min_p`**, **`repeat_penalty`**, **`frequency_penalty`**.
 
 ---

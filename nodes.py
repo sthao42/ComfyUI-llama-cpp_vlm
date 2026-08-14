@@ -113,8 +113,7 @@ if Qwen38ChatHandler is not None or Qwen35ChatHandler is not None:
     chat_handlers += [
         "Qwen3.5", "Qwen3.5-Thinking",
         "Qwen3.6", "Qwen3.6-Thinking",
-        "Qwen3.8", "Qwen3.8-Thinking",
-        "Qwen3.8-27B", "Qwen3.8-27B-Thinking"
+        "Qwen3.8", "Qwen3.8-Thinking"
     ]
 
 try:
@@ -215,7 +214,7 @@ class LLAMA_CPP_STORAGE:
     def load_model(cls, config):
         def get_chat_handler(chat_handler):
             match chat_handler:
-                case "Qwen3.5"|"Qwen3.5-Thinking"|"Qwen3.6"|"Qwen3.6-Thinking"|"Qwen3.8"|"Qwen3.8-Thinking"|"Qwen3.8-27B"|"Qwen3.8-27B-Thinking":
+                case "Qwen3.5"|"Qwen3.5-Thinking"|"Qwen3.6"|"Qwen3.6-Thinking"|"Qwen3.8"|"Qwen3.8-Thinking":
                     return Qwen38ChatHandler if Qwen38ChatHandler is not None else Qwen35ChatHandler
                 case "Qwen3-VL"|"Qwen3-VL-Thinking":
                     return Qwen3VLChatHandler
@@ -931,8 +930,7 @@ class llama_cpp_instruct_adv:
             if LLAMA_CPP_STORAGE.current_config["chat_handler"] in [
                 "Qwen3.5", "Qwen3.5-Thinking",
                 "Qwen3.6", "Qwen3.6-Thinking",
-                "Qwen3.8", "Qwen3.8-Thinking",
-                "Qwen3.8-27B", "Qwen3.8-27B-Thinking"
+                "Qwen3.8", "Qwen3.8-Thinking"
             ]:
                 LLAMA_CPP_STORAGE.llm.n_tokens = 0
                 LLAMA_CPP_STORAGE.llm._ctx.memory_clear(True)

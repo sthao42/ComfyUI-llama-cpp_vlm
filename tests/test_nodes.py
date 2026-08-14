@@ -139,8 +139,10 @@ class TestComfyUILlamaCppVLM(unittest.TestCase):
         self.assertEqual(parsed["label"], "dog")
 
     def test_qwen38_support(self):
-        for model_name in ["Qwen3.8", "Qwen3.8-Thinking", "Qwen3.8-27B", "Qwen3.8-27B-Thinking"]:
+        for model_name in ["Qwen3.8", "Qwen3.8-Thinking"]:
             self.assertIn(model_name, nodes.chat_handlers)
+        self.assertNotIn("Qwen3.8-27B", nodes.chat_handlers)
+        self.assertNotIn("Qwen3.8-27B-Thinking", nodes.chat_handlers)
 
 
 if __name__ == '__main__':
