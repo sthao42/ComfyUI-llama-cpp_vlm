@@ -100,10 +100,22 @@ except Exception:
     Qwen3VLChatHandler = None
 
 try:
+    from llama_cpp.llama_chat_format import Qwen38ChatHandler
+except Exception:
+    Qwen38ChatHandler = None
+
+try:
     from llama_cpp.llama_chat_format import Qwen35ChatHandler
-    chat_handlers += ["Qwen3.5", "Qwen3.5-Thinking", "Qwen3.6", "Qwen3.6-Thinking"]
 except Exception:
     Qwen35ChatHandler = None
+
+if Qwen38ChatHandler is not None or Qwen35ChatHandler is not None:
+    chat_handlers += [
+        "Qwen3.5", "Qwen3.5-Thinking",
+        "Qwen3.6", "Qwen3.6-Thinking",
+        "Qwen3.8", "Qwen3.8-Thinking",
+        "Qwen3.8-27B", "Qwen3.8-27B-Thinking"
+    ]
 
 try:
     from llama_cpp.llama_chat_format import (GLM46VChatHandler, LFM2VLChatHandler, GLM41VChatHandler)
@@ -203,8 +215,8 @@ class LLAMA_CPP_STORAGE:
     def load_model(cls, config):
         def get_chat_handler(chat_handler):
             match chat_handler:
-                case "Qwen3.5"|"Qwen3.5-Thinking"|"Qwen3.6"|"Qwen3.6-Thinking":
-                    return Qwen35ChatHandler
+                case "Qwen3.5"|"Qwen3.5-Thinking"|"Qwen3.6"|"Qwen3.6-Thinking"|"Qwen3.8"|"Qwen3.8-Thinking"|"Qwen3.8-27B"|"Qwen3.8-27B-Thinking":
+                    return Qwen38ChatHandler if Qwen38ChatHandler is not None else Qwen35ChatHandler
                 case "Qwen3-VL"|"Qwen3-VL-Thinking":
                     return Qwen3VLChatHandler
                 case "Qwen3-ASR":
@@ -306,7 +318,7 @@ class LLAMA_CPP_STORAGE:
                 kwargs["force_reasoning"] = think_mode
                 kwargs["image_max_tokens"] = image_max_tokens
                 kwargs["image_min_tokens"] = image_min_tokens
-            elif any(name in chat_handler for name in ["MiniCPM-v4.5", "MiniCPM-v4.6", "GLM-4.6V", "GLM-4.1V", "Qwen3.5", "Qwen3.6", "Gemma4"]):
+            elif any(name in chat_handler for name in ["MiniCPM-v4.5", "MiniCPM-v4.6", "GLM-4.6V", "GLM-4.1V", "Qwen3.5", "Qwen3.6", "Qwen3.8", "Gemma4"]):
                 kwargs["enable_thinking"] = think_mode
 
             if _MTMD:
@@ -812,7 +824,7 @@ class llama_cpp_instruct_adv:
                             raise RuntimeError(
                                 f"Multimodal Context Limit Exceeded ({e}).\n\n"
                                 f"Your prompt and image generated more tokens than n_ctx={LLAMA_CPP_STORAGE.current_config.get('n_ctx', 8192)}.\n"
-                                f"Qwen3.6 / Qwen3.5 and M-RoPE models do not support context shifting in llama.cpp.\n"
+                                f"Qwen3.8 / Qwen3.6 / Qwen3.5 and M-RoPE models do not support context shifting in llama.cpp.\n"
                                 f"👉 Solution: Please increase 'n_ctx' in the Llama-cpp Model Loader node (e.g. from {LLAMA_CPP_STORAGE.current_config.get('n_ctx', 8192)} to 16384 or 32768)."
                             ) from e
                         raise e
@@ -876,7 +888,7 @@ class llama_cpp_instruct_adv:
                         raise RuntimeError(
                             f"Multimodal Context Limit Exceeded ({e}).\n\n"
                             f"Your prompt and images generated more tokens than n_ctx={LLAMA_CPP_STORAGE.current_config.get('n_ctx', 8192)}.\n"
-                            f"Qwen3.6 / Qwen3.5 and M-RoPE models do not support context shifting in llama.cpp.\n"
+                            f"Qwen3.8 / Qwen3.6 / Qwen3.5 and M-RoPE models do not support context shifting in llama.cpp.\n"
                             f"👉 Solution: Please increase 'n_ctx' in the Llama-cpp Model Loader node (e.g. from {LLAMA_CPP_STORAGE.current_config.get('n_ctx', 8192)} to 16384 or 32768)."
                         ) from e
                     raise e
@@ -894,7 +906,7 @@ class llama_cpp_instruct_adv:
                     raise RuntimeError(
                         f"Multimodal Context Limit Exceeded ({e}).\n\n"
                         f"Your prompt and images generated more tokens than n_ctx={LLAMA_CPP_STORAGE.current_config.get('n_ctx', 8192)}.\n"
-                        f"Qwen3.6 / Qwen3.5 and M-RoPE models do not support context shifting in llama.cpp.\n"
+                        f"Qwen3.8 / Qwen3.6 / Qwen3.5 and M-RoPE models do not support context shifting in llama.cpp.\n"
                         f"👉 Solution: Please increase 'n_ctx' in the Llama-cpp Model Loader node (e.g. from {LLAMA_CPP_STORAGE.current_config.get('n_ctx', 8192)} to 16384 or 32768)."
                     ) from e
                 raise e
@@ -916,7 +928,12 @@ class llama_cpp_instruct_adv:
         if force_offload:
             LLAMA_CPP_STORAGE.clean()
         else:
-            if LLAMA_CPP_STORAGE.current_config["chat_handler"] in ["Qwen3.5", "Qwen3.5-Thinking", "Qwen3.6", "Qwen3.6-Thinking"]:
+            if LLAMA_CPP_STORAGE.current_config["chat_handler"] in [
+                "Qwen3.5", "Qwen3.5-Thinking",
+                "Qwen3.6", "Qwen3.6-Thinking",
+                "Qwen3.8", "Qwen3.8-Thinking",
+                "Qwen3.8-27B", "Qwen3.8-27B-Thinking"
+            ]:
                 LLAMA_CPP_STORAGE.llm.n_tokens = 0
                 LLAMA_CPP_STORAGE.llm._ctx.memory_clear(True)
                 if LLAMA_CPP_STORAGE.llm.is_hybrid and LLAMA_CPP_STORAGE.llm._hybrid_cache_mgr is not None:
@@ -940,7 +957,7 @@ class llama_cpp_parameters:
                 "frequency_penalty": ("FLOAT", {"default": 0.0, "min": 0.0, "max": 2.0, "step": 0.01}),
                 "presence_penalty": ("FLOAT", {"default": 0.0, "min": 0.0, "max": 2.0, "step": 0.01}),
                 "stop": ("STRING", {"default": "", "multiline": False, "tooltip": "Comma-separated list of stop phrases to halt generation (e.g. '###, \\n\\n')."}),
-                "reasoning_budget": ("INT", {"default": -1, "min": -1, "max": 32768, "step": 64, "tooltip": "Token budget for thinking models like Gemma4-Thinking (-1 = no budget limit)."}),
+                "reasoning_budget": ("INT", {"default": -1, "min": -1, "max": 32768, "step": 64, "tooltip": "Token budget for thinking models like Gemma4-Thinking / Qwen3.8-Thinking (-1 = no budget limit)."}),
                 "state_uid": ("INT", {
                     "default": -1, "min": -1, "max": 999999, "step": 1,
                     "tooltip": "Use a specific ID to save the conversation state.\n(-1 = use node's unique_id)"

@@ -52,7 +52,7 @@ if "llama_cpp" not in sys.modules:
         "Llava15ChatHandler", "Llava16ChatHandler", "MoondreamChatHandler",
         "NanoLlavaChatHandler", "Llama3VisionAlphaChatHandler", "MiniCPMv26ChatHandler",
         "MTMDChatHandler", "Gemma3ChatHandler", "Gemma4ChatHandler",
-        "Qwen25VLChatHandler", "Qwen3VLChatHandler", "Qwen35ChatHandler",
+        "Qwen25VLChatHandler", "Qwen3VLChatHandler", "Qwen35ChatHandler", "Qwen38ChatHandler",
         "GLM46VChatHandler", "LFM2VLChatHandler", "GLM41VChatHandler",
         "LFM25VLChatHandler", "GraniteDoclingChatHandler", "MiniCPMv45ChatHandler",
         "MiniCPMv46ChatHandler", "PaddleOCRChatHandler", "Qwen3ASRChatHandler", "Step3VLChatHandler"
@@ -157,6 +157,33 @@ class TestEndToEndSimulation(unittest.TestCase):
         sanitized_frame = inst.sanitize_seed(100, offset=3)
         self.assertEqual(sanitized_frame, 103)
         print("[OK] Seed control sanitization & IS_CHANGED caching tests passed.")
+
+        # 7. Test Qwen3.8 / Qwen3.8-27B Chat Handler Resolution
+        orig_init = nodes.Llama.__init__
+        try:
+            nodes.Llama.__init__ = lambda self, **kwargs: None
+            cfg_qwen = loader.loadmodel(
+                model="qwen3.8-27b.gguf",
+                mmproj="None",
+                chat_handler="Qwen3.8-27B",
+                n_ctx=16384,
+                vram_limit=-1,
+                image_min_tokens=0,
+                image_max_tokens=0,
+                n_batch=2048,
+                n_ubatch=512,
+                enable_mtp=False,
+                flash_attn=True,
+                offload_kqv=True,
+                kv_cache_type="f16",
+                n_threads=0
+            )[0]
+        finally:
+            nodes.Llama.__init__ = orig_init
+        self.assertEqual(cfg_qwen["chat_handler"], "Qwen3.8-27B")
+        self.assertEqual(nodes.LLAMA_CPP_STORAGE.current_config["chat_handler"], "Qwen3.8-27B")
+        print("[OK] Qwen3.8-27B handler loading and model configuration tests passed.")
+
 
 if __name__ == '__main__':
     unittest.main()

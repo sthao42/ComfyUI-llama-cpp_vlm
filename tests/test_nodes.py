@@ -54,7 +54,7 @@ if "llama_cpp" not in sys.modules:
         "Llava15ChatHandler", "Llava16ChatHandler", "MoondreamChatHandler",
         "NanoLlavaChatHandler", "Llama3VisionAlphaChatHandler", "MiniCPMv26ChatHandler",
         "MTMDChatHandler", "Gemma3ChatHandler", "Gemma4ChatHandler",
-        "Qwen25VLChatHandler", "Qwen3VLChatHandler", "Qwen35ChatHandler",
+        "Qwen25VLChatHandler", "Qwen3VLChatHandler", "Qwen35ChatHandler", "Qwen38ChatHandler",
         "GLM46VChatHandler", "LFM2VLChatHandler", "GLM41VChatHandler",
         "LFM25VLChatHandler", "GraniteDoclingChatHandler", "MiniCPMv45ChatHandler",
         "MiniCPMv46ChatHandler", "PaddleOCRChatHandler", "Qwen3ASRChatHandler", "Step3VLChatHandler"
@@ -137,6 +137,11 @@ class TestComfyUILlamaCppVLM(unittest.TestCase):
         json_raw = "```json\n{\"bbox_2d\": [10, 20, 30, 40], \"label\": \"dog\"}\n```"
         parsed = nodes.parse_json(json_raw)
         self.assertEqual(parsed["label"], "dog")
+
+    def test_qwen38_support(self):
+        for model_name in ["Qwen3.8", "Qwen3.8-Thinking", "Qwen3.8-27B", "Qwen3.8-27B-Thinking"]:
+            self.assertIn(model_name, nodes.chat_handlers)
+
 
 if __name__ == '__main__':
     unittest.main()
