@@ -421,10 +421,12 @@ def image2base64(image):
     img_base64 = base64.b64encode(buffered.getvalue()).decode('utf-8')
     return img_base64
 
-def parse_json(json_str: str):
+def parse_json(json_str):
+    if isinstance(json_str, (dict, list)):
+        return json_str
     if not json_str:
         raise ValueError("JSON string is empty.")
-    json_output = JSON_CODEBLOCK_PATTERN.sub("", json_str.strip())
+    json_output = JSON_CODEBLOCK_PATTERN.sub("", str(json_str).strip())
     try:
         parsed = json.loads(json_output)
     except Exception as e:
@@ -432,29 +434,31 @@ def parse_json(json_str: str):
     return parsed
 
 def scale_image(image: torch.Tensor, max_size: int = 128):
-    if image.ndim == 4:
-        image = image.squeeze(0)
-    img_np = np.clip(255.0 * image.cpu().numpy(), 0, 255).astype(np.uint8)
+    if hasattr(image, "ndim") and image.ndim == 4:
+        image = image.squeeze(0) if image.shape[0] == 1 else image[0]
+    img_np = np.clip(255.0 * (image.cpu().numpy() if hasattr(image, "cpu") else np.asarray(image)), 0, 255).astype(np.uint8)
     if img_np.ndim == 2:
         img_np = np.stack([img_np] * 3, axis=-1)
     img_pil = Image.fromarray(img_np)
     
     w, h = img_pil.size
-    scale = min(max_size / max(w, h), 1.0)
-    new_w, new_h = int(w * scale), int(h * scale)
+    scale = min(max_size / max(w, h), 1.0) if max(w, h) > 0 else 1.0
+    new_w, new_h = max(1, int(w * scale)), max(1, int(h * scale))
     img_resized = img_pil.resize((new_w, new_h), Image.Resampling.LANCZOS)
     
     return np.array(img_resized)
 
 def qwen3bbox(image, json):
-    if image.ndim == 4:
-        image = image.squeeze(0)
-    img_np = np.clip(255.0 * image.cpu().numpy(), 0, 255).astype(np.uint8)
+    if hasattr(image, "ndim") and image.ndim == 4:
+        image = image.squeeze(0) if image.shape[0] == 1 else image[0]
+    img_np = np.clip(255.0 * (image.cpu().numpy() if hasattr(image, "cpu") else np.asarray(image)), 0, 255).astype(np.uint8)
     if img_np.ndim == 2:
         img_np = np.stack([img_np] * 3, axis=-1)
     img = Image.fromarray(img_np)
     bboxes = []
     for item in json:
+        if not isinstance(item, dict) or "bbox_2d" not in item:
+            continue
         x0, y0, x1, y1 = item["bbox_2d"]
         size = 1000
         x0 = x0 / size * img.width
@@ -466,15 +470,17 @@ def qwen3bbox(image, json):
 
 def draw_bbox(image, json, mode):
     label_colors = {}
-    if image.ndim == 4:
-        image = image.squeeze(0)
-    img_np = np.clip(255.0 * image.cpu().numpy(), 0, 255).astype(np.uint8)
+    if hasattr(image, "ndim") and image.ndim == 4:
+        image = image.squeeze(0) if image.shape[0] == 1 else image[0]
+    img_np = np.clip(255.0 * (image.cpu().numpy() if hasattr(image, "cpu") else np.asarray(image)), 0, 255).astype(np.uint8)
     if img_np.ndim == 2:
         img_np = np.stack([img_np] * 3, axis=-1)
     img = Image.fromarray(img_np)
     draw = ImageDraw.Draw(img)
     
     for item in json:
+        if not isinstance(item, dict):
+            continue
         try:
             label = item["label"]
         except Exception:
@@ -482,6 +488,8 @@ def draw_bbox(image, json, mode):
                 label = item["text_content"]
             except Exception:
                 label = "bbox"
+        if "bbox_2d" not in item:
+            continue
         x0, y0, x1, y1 = item["bbox_2d"]
         if mode in ["Qwen3-VL", "Qwen2.5-VL"]:
             size = 1000
@@ -496,9 +504,9 @@ def draw_bbox(image, json, mode):
         color = label_colors[label]
         draw.rectangle(bbox, outline=color, width=4)
         text_y = max(0, y0 - 10)
-        text_size = draw.textbbox((x0, text_y), label)
+        text_size = draw.textbbox((x0, text_y), str(label))
         draw.rectangle([text_size[0], text_size[1]-2, text_size[2]+4, text_size[3]+2], fill=color)
-        draw.text((x0+2, text_y), label, fill=(255,255,255))
+        draw.text((x0+2, text_y), str(label), fill=(255,255,255))
     return torch.from_numpy(np.array(img).astype(np.float32) / 255.0).unsqueeze(0)
 
 def strip_think_block(text: str) -> str:
@@ -509,31 +517,33 @@ def strip_think_block(text: str) -> str:
     cleaned = THINK_BLOCK_UNCLOSED_PATTERN.sub('', cleaned)
     return cleaned.strip()
 
+def _flatten_image_tensors(val) -> list:
+    results = []
+    if val is None:
+        return results
+    if isinstance(val, list):
+        for item in val:
+            results.extend(_flatten_image_tensors(item))
+    elif hasattr(val, "ndim") and val.ndim == 4:
+        for i in range(val.shape[0]):
+            results.append(val[i])
+    else:
+        results.append(val)
+    return results
+
 def collect_image_inputs(kwargs: dict) -> list:
-    """Collect image and video frame inputs dynamically from kwargs (image_0..image_8 and video_0)."""
+    """Collect image and video frame inputs dynamically from kwargs (image_0..image_8 and video_0..video_8)."""
     all_images = []
-    # Collect image sockets (image_0 to image_8 and images)
-    for key in ["images"] + [f"image_{i}" for i in range(9)]:
+    keys_to_check = (
+        ["images"]
+        + [f"image_{i}" for i in range(9)]
+        + ["video", "videos"]
+        + [f"video_{i}" for i in range(9)]
+    )
+    for key in keys_to_check:
         img_val = kwargs.get(key, None)
         if img_val is not None:
-            if isinstance(img_val, list):
-                all_images.extend(img_val)
-            elif len(img_val.shape) == 4:
-                for i in range(img_val.shape[0]):
-                    all_images.append(img_val[i])
-            else:
-                all_images.append(img_val)
-                
-    # Collect video socket (video_0)
-    vid_val = kwargs.get("video_0", None)
-    if vid_val is not None:
-        if isinstance(vid_val, list):
-            all_images.extend(vid_val)
-        elif len(vid_val.shape) == 4:
-            for i in range(vid_val.shape[0]):
-                all_images.append(vid_val[i])
-        else:
-            all_images.append(vid_val)
+            all_images.extend(_flatten_image_tensors(img_val))
                 
     return all_images
 
@@ -927,15 +937,24 @@ class llama_cpp_instruct_adv:
         if force_offload:
             LLAMA_CPP_STORAGE.clean()
         else:
-            if LLAMA_CPP_STORAGE.current_config["chat_handler"] in [
+            if LLAMA_CPP_STORAGE.current_config and LLAMA_CPP_STORAGE.current_config.get("chat_handler") in [
                 "Qwen3.5", "Qwen3.5-Thinking",
                 "Qwen3.6", "Qwen3.6-Thinking",
                 "Qwen3.8", "Qwen3.8-Thinking"
             ]:
-                LLAMA_CPP_STORAGE.llm.n_tokens = 0
-                LLAMA_CPP_STORAGE.llm._ctx.memory_clear(True)
-                if LLAMA_CPP_STORAGE.llm.is_hybrid and LLAMA_CPP_STORAGE.llm._hybrid_cache_mgr is not None:
-                    LLAMA_CPP_STORAGE.llm._hybrid_cache_mgr.clear()
+                if LLAMA_CPP_STORAGE.llm is not None:
+                    if hasattr(LLAMA_CPP_STORAGE.llm, "n_tokens"):
+                        LLAMA_CPP_STORAGE.llm.n_tokens = 0
+                    if hasattr(LLAMA_CPP_STORAGE.llm, "_ctx") and hasattr(LLAMA_CPP_STORAGE.llm._ctx, "memory_clear"):
+                        try:
+                            LLAMA_CPP_STORAGE.llm._ctx.memory_clear(True)
+                        except Exception:
+                            pass
+                    if getattr(LLAMA_CPP_STORAGE.llm, "is_hybrid", False) and getattr(LLAMA_CPP_STORAGE.llm, "_hybrid_cache_mgr", None) is not None:
+                        try:
+                            LLAMA_CPP_STORAGE.llm._hybrid_cache_mgr.clear()
+                        except Exception:
+                            pass
             
         del messages
         gc.collect()
@@ -1051,8 +1070,8 @@ class json_to_bbox:
     CATEGORY = "llama-cpp-vlm"
     
     def process(self, json, mode, label, image=None):
-        mode = mode[0]
-        label = label[0]
+        mode = mode[0] if isinstance(mode, list) and len(mode) > 0 else (mode if isinstance(mode, str) else "simple")
+        label = label[0] if isinstance(label, list) and len(label) > 0 else (label if isinstance(label, str) else "")
 
         flat_images_list = []
         original_structure = []
@@ -1103,7 +1122,7 @@ class json_to_bbox:
                 curr_idx = i if i < total_images else (total_images - 1)
                 bbox = qwen3bbox(flat_images_list[curr_idx][0], bboxes)
             else:
-                bbox = [tuple(item["bbox_2d"]) for item in bboxes]
+                bbox = [tuple(item["bbox_2d"]) for item in bboxes if isinstance(item, dict) and "bbox_2d" in item]
                 
             output_bboxes.append(bbox)
             
@@ -1159,6 +1178,8 @@ class bbox_to_segs:
                 continue
             
             x1, y1, x2, y2 = map(int, bbox)
+            x1, x2 = min(x1, x2), max(x1, x2)
+            y1, y2 = min(y1, y2), max(y1, y2)
             x1_exp = x1 - dilation
             y1_exp = y1 - dilation
             x2_exp = x2 + dilation
@@ -1246,6 +1267,8 @@ class bbox_to_mask:
                 continue
             
             x1, y1, x2, y2 = map(int, bbox)
+            x1, x2 = min(x1, x2), max(x1, x2)
+            y1, y2 = min(y1, y2), max(y1, y2)
             x1_exp = x1 - dilation
             y1_exp = y1 - dilation
             x2_exp = x2 + dilation
@@ -1306,9 +1329,15 @@ class bboxes_to_bbox:
     CATEGORY = "llama-cpp-vlm"
     
     def process(self, bboxes, image_index, bbox_index):
+        if not bboxes:
+            return ([],)
+        idx = min(image_index, len(bboxes) - 1)
         if bbox_index != 999:
-            return ([bboxes[image_index][bbox_index]],)
-        return (bboxes[image_index],)
+            if idx < len(bboxes) and len(bboxes[idx]) > 0:
+                b_idx = bbox_index if 0 <= bbox_index < len(bboxes[idx]) else (len(bboxes[idx]) - 1 if bbox_index < 0 else 0)
+                return ([bboxes[idx][b_idx]],)
+            return ([],)
+        return (bboxes[idx],)
 
 # from: https://github.com/crystian/ComfyUI-Crystools
 # from: https://github.com/crystian/ComfyUI-Crystools
@@ -1377,6 +1406,12 @@ def get_nested_value(data, dotted_key, default=None):
                 return default
         if isinstance(data, dict) and key in data:
             data = data[key]
+        elif isinstance(data, list):
+            try:
+                idx = int(key)
+                data = data[idx]
+            except (ValueError, IndexError):
+                return default
         else:
             return default
     return data

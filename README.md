@@ -66,7 +66,7 @@ python -m pip install -r ComfyUI-llama-cpp_vlm/requirements.txt
 * **`enable_mtp`**: Enable Multi-Token Prediction (speculative decoding).
 
 ### `llama_cpp_instruct_adv`
-* **`image_0`**: Initial image socket. Connecting an image automatically reveals `image_1`, `image_2`, up to `image_7`.
+* **`image_0`**: Initial image socket. Connecting an image automatically reveals `image_1`, `image_2`, up to `image_8`.
 * **`custom_prompt`**: Input user prompt. Use `<Picture 0>`, `<Picture 1>` placeholders to position images inline.
 * **`preset_prompt`**: Select pre-configured prompts for captioning, tagging, Midjourney/Flux prompt styling, or multi-image comparison.
 

@@ -144,6 +144,24 @@ class TestComfyUILlamaCppVLM(unittest.TestCase):
         self.assertNotIn("Qwen3.8-27B", nodes.chat_handlers)
         self.assertNotIn("Qwen3.8-27B-Thinking", nodes.chat_handlers)
 
+    def test_flatten_image_tensors_and_collection(self):
+        t1 = torch.zeros(2, 64, 64, 3)
+        t2 = torch.zeros(1, 64, 64, 3)
+        kwargs = {"image_0": t1, "video_0": [t2, t1]}
+        collected = nodes.collect_image_inputs(kwargs)
+        self.assertEqual(len(collected), 5)
+
+    def test_get_nested_value_array_support(self):
+        data = {"items": [{"name": "first"}, {"name": "second"}]}
+        self.assertEqual(nodes.get_nested_value(data, "items.1.name"), "second")
+        self.assertEqual(nodes.get_nested_value(data, "items.5.name", default="none"), "none")
+
+    def test_bboxes_boundary_safety(self):
+        node = nodes.bboxes_to_bbox()
+        self.assertEqual(node.process([], 0, 0), ([],))
+        self.assertEqual(node.process([[(10, 20, 30, 40)]], 5, 0), ([(10, 20, 30, 40)],))
+        self.assertEqual(node.process([[(10, 20, 30, 40)]], 0, 999), ([(10, 20, 30, 40)],))
+
 
 if __name__ == '__main__':
     unittest.main()
