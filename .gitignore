@@ -9,3 +9,4 @@ checkpoints/
 *.tmp
 .env*
 secrets/
+.agents/
