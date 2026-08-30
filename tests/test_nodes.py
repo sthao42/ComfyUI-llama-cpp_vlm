@@ -41,7 +41,7 @@ if "comfy" not in sys.modules:
 if "llama_cpp" not in sys.modules:
     llama_cpp = types.ModuleType("llama_cpp")
     class DummyLlama:
-        def __init__(self, **kwargs): pass
+        def __init__(self, model_path=None, chat_handler=None, n_gpu_layers=None, n_ctx=None, n_batch=None, n_ubatch=None, speculative=None, draft_model=None, flash_attn=None, offload_kqv=None, type_k=None, type_v=None, n_threads=None, verbose=False, **kwargs): pass
         def close(self): pass
         def create_chat_completion(self, **kwargs):
             return {"choices": [{"message": {"content": "Mock completion response"}}]}
@@ -61,8 +61,35 @@ if "llama_cpp" not in sys.modules:
     ]:
         setattr(chat_fmt, h_name, DummyHandler)
     llama_cpp.llama_chat_format = chat_fmt
+    llama_spec = types.ModuleType("llama_cpp.llama_speculative")
+    import enum
+    class SpeculativeType(enum.IntEnum):
+        NONE = 0
+        DRAFT_SIMPLE = 1
+        DRAFT_EAGLE3 = 2
+        DRAFT_MTP = 3
+        DRAFT_DFLASH = 4
+        DRAFT_DSPARK = 5
+        NGRAM_SIMPLE = 6
+        NGRAM_MAP_K = 7
+        NGRAM_MAP_K4V = 8
+        NGRAM_MOD = 9
+        NGRAM_CACHE = 10
+    class SpecConfig:
+        def __init__(self, spec_type=SpeculativeType.NONE, **kwargs):
+            self.spec_type = spec_type
+            for k, v in kwargs.items():
+                setattr(self, k, v)
+    class LlamaNGramMapDecoding:
+        def __init__(self, **kwargs): pass
+    llama_spec.SpeculativeType = SpeculativeType
+    llama_spec.SpecConfig = SpecConfig
+    llama_spec.LlamaNGramMapDecoding = LlamaNGramMapDecoding
+    llama_cpp.llama_speculative = llama_spec
+
     sys.modules["llama_cpp"] = llama_cpp
     sys.modules["llama_cpp.llama_chat_format"] = chat_fmt
+    sys.modules["llama_cpp.llama_speculative"] = llama_spec
 
 import nodes
 
@@ -161,6 +188,37 @@ class TestComfyUILlamaCppVLM(unittest.TestCase):
         self.assertEqual(node.process([], 0, 0), ([],))
         self.assertEqual(node.process([[(10, 20, 30, 40)]], 5, 0), ([(10, 20, 30, 40)],))
         self.assertEqual(node.process([[(10, 20, 30, 40)]], 0, 999), ([(10, 20, 30, 40)],))
+
+    def test_speculative_config_integration(self):
+        loader = nodes.llama_cpp_model_loader()
+        captured_kwargs = {}
+        def mock_init(self, model_path=None, chat_handler=None, n_gpu_layers=None, n_ctx=None, n_batch=None, n_ubatch=None, speculative=None, draft_model=None, **kwargs):
+            captured_kwargs.update(kwargs)
+            if speculative is not None:
+                captured_kwargs["speculative"] = speculative
+            if draft_model is not None:
+                captured_kwargs["draft_model"] = draft_model
+        orig_init = nodes.Llama.__init__
+        try:
+            nodes.Llama.__init__ = mock_init
+            loader.loadmodel(
+                model="fake_model.gguf",
+                mmproj="None",
+                chat_handler="None",
+                n_ctx=4096,
+                vram_limit=-1,
+                image_min_tokens=0,
+                image_max_tokens=0,
+                enable_mtp=True
+            )
+        finally:
+            nodes.Llama.__init__ = orig_init
+
+        from llama_cpp.llama_speculative import SpecConfig, SpeculativeType
+        self.assertIn("speculative", captured_kwargs)
+        spec = captured_kwargs["speculative"]
+        self.assertIsInstance(spec, SpecConfig)
+        self.assertEqual(spec.spec_type, SpeculativeType.NGRAM_MAP_K)
 
 
 if __name__ == '__main__':

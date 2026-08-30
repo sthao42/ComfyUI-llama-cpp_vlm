@@ -9,7 +9,7 @@
 
 ### 📋 环境要求
 > [!IMPORTANT]
-> 本节点套件需要 **`llama-cpp-python` v0.3.46 或更高版本**。预编译的 CUDA 13.0、CUDA 12.8 及 Metal 加速 Wheel 文件可以在 [`JamePeng/llama-cpp-python`](https://github.com/JamePeng/llama-cpp-python) 仓库中获取。
+> 本节点套件需要 **`llama-cpp-python` v0.3.48 或更高版本**。预编译的 CUDA 13.0、CUDA 12.8 及 Metal 加速 Wheel 文件可以在 [`JamePeng/llama-cpp-python`](https://github.com/JamePeng/llama-cpp-python) 仓库中获取。
 
 #### 安装节点:
 ```bash

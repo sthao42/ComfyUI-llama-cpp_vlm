@@ -39,7 +39,7 @@ if "comfy" not in sys.modules:
 if "llama_cpp" not in sys.modules:
     llama_cpp = types.ModuleType("llama_cpp")
     class DummyLlama:
-        def __init__(self, **kwargs): pass
+        def __init__(self, model_path=None, chat_handler=None, n_gpu_layers=None, n_ctx=None, n_batch=None, n_ubatch=None, speculative=None, draft_model=None, flash_attn=None, offload_kqv=None, type_k=None, type_v=None, n_threads=None, verbose=False, **kwargs): pass
         def close(self): pass
         def create_chat_completion(self, **kwargs):
             return {"choices": [{"message": {"content": "Mock completion response"}}]}
@@ -59,8 +59,35 @@ if "llama_cpp" not in sys.modules:
     ]:
         setattr(chat_fmt, h_name, DummyHandler)
     llama_cpp.llama_chat_format = chat_fmt
+    llama_spec = types.ModuleType("llama_cpp.llama_speculative")
+    import enum
+    class SpeculativeType(enum.IntEnum):
+        NONE = 0
+        DRAFT_SIMPLE = 1
+        DRAFT_EAGLE3 = 2
+        DRAFT_MTP = 3
+        DRAFT_DFLASH = 4
+        DRAFT_DSPARK = 5
+        NGRAM_SIMPLE = 6
+        NGRAM_MAP_K = 7
+        NGRAM_MAP_K4V = 8
+        NGRAM_MOD = 9
+        NGRAM_CACHE = 10
+    class SpecConfig:
+        def __init__(self, spec_type=SpeculativeType.NONE, **kwargs):
+            self.spec_type = spec_type
+            for k, v in kwargs.items():
+                setattr(self, k, v)
+    class LlamaNGramMapDecoding:
+        def __init__(self, **kwargs): pass
+    llama_spec.SpeculativeType = SpeculativeType
+    llama_spec.SpecConfig = SpecConfig
+    llama_spec.LlamaNGramMapDecoding = LlamaNGramMapDecoding
+    llama_cpp.llama_speculative = llama_spec
+
     sys.modules["llama_cpp"] = llama_cpp
     sys.modules["llama_cpp.llama_chat_format"] = chat_fmt
+    sys.modules["llama_cpp.llama_speculative"] = llama_spec
 
 import nodes
 
@@ -74,7 +101,7 @@ class TestEndToEndSimulation(unittest.TestCase):
         
         orig_init = nodes.Llama.__init__
         try:
-            nodes.Llama.__init__ = lambda self, **kwargs: None
+            nodes.Llama.__init__ = lambda self, model_path=None, chat_handler=None, n_gpu_layers=None, n_ctx=None, n_batch=None, n_ubatch=None, speculative=None, draft_model=None, **kwargs: None
             cfg = loader.loadmodel(
                 model="fake_model.gguf",
                 mmproj="None",

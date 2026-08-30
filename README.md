@@ -20,7 +20,7 @@ An advanced, high-performance ComfyUI custom node suite for running Large Langua
 
 ### ⚡ Performance & Long-Context Optimizations
 * **Flash Attention (`flash_attn`):** Reduces KV cache VRAM consumption by 50–70% on long context windows (8k–128k) and accelerates multi-image token processing.
-* **Multi-Token Prediction (MTP / Speculative Decoding):** Toggleable `enable_mtp` using `LlamaNGramMapDecoding` for accelerated, human-readable text generation without raw token ID artifacts.
+* **Multi-Token Prediction (MTP / Speculative Decoding):** Toggleable `enable_mtp` using `SpecConfig` (`SpeculativeType.NGRAM_MAP_K`) for accelerated, human-readable text generation without raw token ID artifacts.
 * **Uncapped Output Tokens (`max_tokens = -1`):** Generate long detailed captions, code, or prompts up to `4096` tokens or set `max_tokens = -1` for uncapped generation up to the remaining context window limit (`n_ctx`).
 * **Batch Tuning (`n_batch`, `n_ubatch`):** Fine-grained control over prompt evaluation batch size and physical micro-batch sizes.
 * **Smart Context Protection:** Automatically calculates estimated token usage (`system_prompt` + `user_prompt` + `N_images * 1024`) against `n_ctx` and logs console warnings if context length needs scaling.
@@ -38,7 +38,7 @@ An advanced, high-performance ComfyUI custom node suite for running Large Langua
 
 ### 📋 Requirements
 > [!IMPORTANT]
-> Requires **`llama-cpp-python` v0.3.46 or newer** to function properly. Pre-built wheels with CUDA 13.0, CUDA 12.8, and Metal acceleration can be found at the [`JamePeng/llama-cpp-python`](https://github.com/JamePeng/llama-cpp-python) repository.
+> Requires **`llama-cpp-python` v0.3.48 or newer** to function properly. Pre-built wheels with CUDA 13.0, CUDA 12.8, and Metal acceleration can be found at the [`JamePeng/llama-cpp-python`](https://github.com/JamePeng/llama-cpp-python) repository.
 
 ### 1. Clone the repository into ComfyUI custom nodes:
 ```bash
@@ -63,7 +63,7 @@ python -m pip install -r ComfyUI-llama-cpp_vlm/requirements.txt
 * **`offload_kqv`**: Offload Key/Query/Value KV cache tensors directly to GPU VRAM for maximum speed.
 * **`kv_cache_type`**: Choose `"f16"`, `"q8_0"`, or `"q4_0"`. Quantizing KV cache saves up to 75% VRAM on 16k–128k context windows.
 * **`n_threads`**: CPU thread tuning for generation (`0` = auto-detect).
-* **`enable_mtp`**: Enable Multi-Token Prediction (speculative decoding).
+* **`enable_mtp`**: Enable Multi-Token Prediction (speculative decoding with `SpecConfig`).
 
 ### `llama_cpp_instruct_adv`
 * **`image_0`**: Initial image socket. Connecting an image automatically reveals `image_1`, `image_2`, up to `image_8`.

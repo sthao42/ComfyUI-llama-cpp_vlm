@@ -375,11 +375,22 @@ class LLAMA_CPP_STORAGE:
             
         if enable_mtp:
             try:
-                from llama_cpp.llama_speculative import LlamaNGramMapDecoding
-                llama_kwargs["draft_model"] = LlamaNGramMapDecoding()
-                print("[llama-cpp_vlm] Multi-Token Prediction (MTP / Speculative Decoding) enabled using LlamaNGramMapDecoding.")
+                from llama_cpp.llama_speculative import SpecConfig, SpeculativeType
+                if "speculative" in llama_init_params:
+                    llama_kwargs["speculative"] = SpecConfig(spec_type=SpeculativeType.NGRAM_MAP_K)
+                    print("[llama-cpp_vlm] Multi-Token Prediction (MTP / Speculative Decoding) enabled using SpecConfig (NGRAM_MAP_K).")
+                else:
+                    from llama_cpp.llama_speculative import LlamaNGramMapDecoding
+                    llama_kwargs["draft_model"] = LlamaNGramMapDecoding(spec_type=SpeculativeType.NGRAM_MAP_K)
+                    print("[llama-cpp_vlm] Multi-Token Prediction (MTP / Speculative Decoding) enabled using LlamaNGramMapDecoding.")
             except Exception as e:
-                print(f"[llama-cpp_vlm] Warning: MTP (draft_model) failed to initialize: {e}")
+                # Fallback for older llama-cpp-python versions
+                try:
+                    from llama_cpp.llama_speculative import LlamaNGramMapDecoding
+                    llama_kwargs["draft_model"] = LlamaNGramMapDecoding()
+                    print("[llama-cpp_vlm] Multi-Token Prediction (MTP / Speculative Decoding) enabled using legacy LlamaNGramMapDecoding.")
+                except Exception as e2:
+                    print(f"[llama-cpp_vlm] Warning: MTP (speculative decoding) failed to initialize: {e} / {e2}")
 
         cls.llm = Llama(**llama_kwargs)
 
@@ -582,7 +593,7 @@ class llama_cpp_model_loader:
             }),
             "enable_mtp": ("BOOLEAN", {
                 "default": False,
-                "tooltip": "Enable Multi-Token Prediction (MTP / Speculative Decoding) using LlamaNGramMapDecoding to accelerate token generation."
+                "tooltip": "Enable Multi-Token Prediction (MTP / Speculative Decoding) using SpecConfig (NGRAM_MAP_K) to accelerate token generation."
             }),
             "flash_attn": ("BOOLEAN", {
                 "default": True,
