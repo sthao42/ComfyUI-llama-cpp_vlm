@@ -334,6 +334,25 @@ class TestComfyUILlamaCppVLM(unittest.TestCase):
             nodes.LLAMA_CPP_STORAGE.chat_handler = orig_handler
             nodes.LLAMA_CPP_STORAGE.current_config = orig_config
 
+    def test_prompt_enhancer_preset_no_wan(self):
+        preset_node = nodes.PromptEnhancerPreset()
+        input_types = nodes.PromptEnhancerPreset.INPUT_TYPES()
+        presets = input_types["required"]["preset"][0]
+        # Verify no "Wan" presets exist
+        for p in presets:
+            self.assertNotIn("wan", p.lower())
+        # Verify core image presets are present
+        self.assertIn("Qwen-Image [EN]", presets)
+        self.assertIn("Flux.2 T2I", presets)
+        self.assertIn("Z-Image Turbo", presets)
+        # Verify functionality
+        res = preset_node.main("Flux.2 T2I")
+        self.assertIsInstance(res, tuple)
+        self.assertTrue(len(res[0]) > 0)
+        # Verify unknown preset raises ValueError
+        with self.assertRaises(ValueError):
+            preset_node.main("Wan T2V [EN]")
+
 
 if __name__ == '__main__':
     unittest.main()

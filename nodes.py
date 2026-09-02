@@ -1581,14 +1581,6 @@ PRESET_LOOKUP = {
     "Z-Image Turbo": getattr(preset_mod, "ZIMAGE_TURBO", ""),
     "Flux.2 T2I": getattr(preset_mod, "FLUX2_T2I", ""),
     "Flux.2 I2I": getattr(preset_mod, "FLUX2_I2I", ""),
-    "Wan T2V [EN]": getattr(preset_mod, "WAN_T2V_EN", ""),
-    "Wan T2V [ZH]": getattr(preset_mod, "WAN_T2V_ZH", ""),
-    "Wan I2V [EN]": getattr(preset_mod, "WAN_I2V_EN", ""),
-    "Wan I2V [ZH]": getattr(preset_mod, "WAN_I2V_ZH", ""),
-    "Wan I2V Full-Auto [EN]": getattr(preset_mod, "WAN_I2V_EMPTY_EN", ""),
-    "Wan I2V Full-Auto [ZH]": getattr(preset_mod, "WAN_I2V_EMPTY_ZH", ""),
-    "Wan FLF2V [EN]": getattr(preset_mod, "WAN_FLF2V_EN", ""),
-    "Wan FLF2V [ZH]": getattr(preset_mod, "WAN_FLF2V_ZH", ""),
 }
 
 class PromptEnhancerPreset:
