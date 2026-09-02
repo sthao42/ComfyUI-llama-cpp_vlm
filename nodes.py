@@ -1101,7 +1101,6 @@ class llama_cpp_parameters:
             },
             "optional": {
                 "dry_multiplier": ("FLOAT", {"default": 0.0, "min": 0.0, "max": 5.0, "step": 0.05, "tooltip": "DRY (Don't Repeat Yourself) repetition penalty multiplier (0.0 = disabled, e.g. 0.8). In llama-cpp-python 0.3.49 dry_penalty_last_n defaults to 64."}),
-                "ignore_eos": ("BOOLEAN", {"default": False, "tooltip": "Suppress end-of-generation tokens and continue generation until context or max_tokens."}),
             }
         }
     RETURN_TYPES = ("LLAMACPPARAMS",)
@@ -1129,9 +1128,6 @@ class llama_cpp_parameters:
 
         if kwargs.get("dry_multiplier", 0.0) == 0.0:
             kwargs.pop("dry_multiplier", None)
-
-        if not kwargs.get("ignore_eos", False):
-            kwargs.pop("ignore_eos", None)
 
         return (kwargs,)
     

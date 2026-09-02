@@ -257,28 +257,24 @@ class TestComfyUILlamaCppVLM(unittest.TestCase):
         self.assertEqual(spec.spec_type, SpeculativeType.DRAFT_DFLASH)
         self.assertTrue(hasattr(spec, "draft_model_path"))
 
-    def test_parameters_node_dry_and_ignore_eos(self):
+    def test_parameters_node_dry(self):
         params_node = nodes.llama_cpp_parameters()
         raw = {
             "max_tokens": 2048,
             "presence_penalty": 0.5,
-            "dry_multiplier": 0.8,
-            "ignore_eos": True
+            "dry_multiplier": 0.8
         }
         res = params_node.process(**raw)[0]
         self.assertEqual(res["presence_penalty"], 0.5)
         self.assertEqual(res["dry_multiplier"], 0.8)
-        self.assertTrue(res["ignore_eos"])
 
         # Check default suppression
         raw_default = {
             "max_tokens": 2048,
-            "dry_multiplier": 0.0,
-            "ignore_eos": False
+            "dry_multiplier": 0.0
         }
         res_default = params_node.process(**raw_default)[0]
         self.assertNotIn("dry_multiplier", res_default)
-        self.assertNotIn("ignore_eos", res_default)
 
     def test_requirements_version(self):
         req_path = os.path.join(REPO_ROOT, "requirements.txt")
