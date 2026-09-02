@@ -431,6 +431,9 @@ class LLAMA_CPP_STORAGE:
                         llama_kwargs["speculative"] = SpecConfig(**spec_kwargs)
                         print(f"[llama-cpp_vlm] Speculative Decoding enabled using SpecConfig ({resolved_type.name})"
                               f"{f' with draft model: {draft_model}' if draft_model_path else ''}.")
+                        if (mmproj and mmproj != "None") and draft_model_path:
+                            print(f"[llama-cpp_vlm] Note: Draft model '{draft_model}' is active alongside multimodal clip '{mmproj}'. "
+                                  "llama.cpp draft sidecars accelerate text generation and are automatically bypassed when processing image inputs.")
                     else:
                         from llama_cpp.llama_speculative import LlamaNGramMapDecoding
                         llama_kwargs["draft_model"] = LlamaNGramMapDecoding(spec_type=resolved_type)
@@ -673,7 +676,7 @@ class llama_cpp_model_loader:
                 }),
                 "draft_model": (draft_model_list, {
                     "default": "None",
-                    "tooltip": "Optional draft / sidecar model for DFlash / DSpark / MTP speculative decoding (llama.cpp 0.3.49+)."
+                    "tooltip": "Optional draft / sidecar model for DFlash / DSpark / MTP speculative decoding (llama.cpp 0.3.49+).\nNote: Draft sidecars accelerate text generation and are automatically bypassed when processing image inputs."
                 }),
             }
         }
@@ -862,105 +865,154 @@ class llama_cpp_instruct_adv:
         completion_params = inspect.signature(LLAMA_CPP_STORAGE.llm.create_chat_completion).parameters
         final_params = {k: v for k, v in _parameters.items() if k in completion_params}
 
-        if len(all_images) > 0:
-            h = LLAMA_CPP_STORAGE.chat_handler
-            h_path = getattr(h, "mmproj_path", getattr(h, "clip_model_path", None)) if h is not None else None
-            if h_path is None:
-                 raise ValueError("Image input detected, but the loaded model is not configured with a mmproj module.")
-                
-            n_ctx = LLAMA_CPP_STORAGE.current_config.get("n_ctx", 8192) if LLAMA_CPP_STORAGE.current_config else 8192
-            est_tokens = len(system_prompts) // 3 + len(prompt_text) // 3 + (len(all_images) * 1024)
-            if est_tokens > n_ctx * 0.9:
-                print(f"[llama-cpp_vlm] Warning: Estimated prompt + multi-image tokens ({est_tokens}) close to or exceeding n_ctx ({n_ctx}). Consider increasing n_ctx in model loader.")
+        # Check if the dialogue involves multimodal media (images/videos)
+        has_media = len(all_images) > 0 or any(
+            isinstance(msg.get("content"), list) and any(
+                isinstance(item, dict) and item.get("type") in ("image_url", "image", "video_url", "video")
+                for item in msg.get("content", [])
+            )
+            for msg in messages
+        )
 
-            frames = all_images
-            if video_input and len(all_images) > max_frames:
-                indices = np.linspace(0, len(all_images) - 1, max_frames, dtype=int)
-                frames = [all_images[i] for i in indices]
-                
-            if inference_mode == "one by one":
-                tmp_list = []
-                print(f"[llama-cpp_vlm] Start processing {len(frames)} images one by one")
-                
-                for i, image in enumerate(cqdm(frames)):
-                    if mm.processing_interrupted():
-                        raise mm.InterruptProcessingException()
-                    if image.ndim == 4:
-                        image = image.squeeze(0)
-                    img_np = np.clip(255.0 * image.cpu().numpy(), 0, 255).astype(np.uint8)
-                    if img_np.ndim == 2:
-                        img_np = np.stack([img_np] * 3, axis=-1)
-                    data = image2base64(img_np)
+        # Model-backed draft sidecars (DFlash, DSpark, MTP) in llama.cpp only support text sequences.
+        # When multimodal image tokens are evaluated, their 4D M-RoPE positions cannot be mapped to the draft context,
+        # which causes llama_decode (code -1) in draft_context.
+        # We automatically bypass model-backed draft engines for multimodal calls, keeping them active for text-only calls.
+        spec_engine = getattr(LLAMA_CPP_STORAGE.llm, "speculative", None)
+        has_draft_ctx = spec_engine is not None and getattr(spec_engine, "draft_context", None) is not None
+        bypass_spec = has_media and has_draft_ctx
+        if bypass_spec:
+            print("[llama-cpp_vlm] Multimodal input detected: llama.cpp model-backed draft sidecars (DFlash/DSpark/MTP) are text-only; automatically bypassing draft model for this multimodal request.")
+            LLAMA_CPP_STORAGE.llm.speculative = None
+
+        try:
+            if len(all_images) > 0:
+                h = LLAMA_CPP_STORAGE.chat_handler
+                h_path = getattr(h, "mmproj_path", getattr(h, "clip_model_path", None)) if h is not None else None
+                if h_path is None:
+                     raise ValueError("Image input detected, but the loaded model is not configured with a mmproj module.")
                     
-                    frame_user_content = [
-                        {"type": "text", "text": prompt_text},
-                        {"type": "image_url", "image_url": {"url": f"data:image/jpeg;base64,{data}"}}
-                    ]
-                    frame_messages = messages + [{"role": "user", "content": frame_user_content}]
-                    frame_seed = self.sanitize_seed(base_seed, offset=i)
+                n_ctx = LLAMA_CPP_STORAGE.current_config.get("n_ctx", 8192) if LLAMA_CPP_STORAGE.current_config else 8192
+                est_tokens = len(system_prompts) // 3 + len(prompt_text) // 3 + (len(all_images) * 1024)
+                if est_tokens > n_ctx * 0.9:
+                    print(f"[llama-cpp_vlm] Warning: Estimated prompt + multi-image tokens ({est_tokens}) close to or exceeding n_ctx ({n_ctx}). Consider increasing n_ctx in model loader.")
+
+                frames = all_images
+                if video_input and len(all_images) > max_frames:
+                    indices = np.linspace(0, len(all_images) - 1, max_frames, dtype=int)
+                    frames = [all_images[i] for i in indices]
+                    
+                if inference_mode == "one by one":
+                    tmp_list = []
+                    print(f"[llama-cpp_vlm] Start processing {len(frames)} images one by one")
+                    
+                    for i, image in enumerate(cqdm(frames)):
+                        if mm.processing_interrupted():
+                            raise mm.InterruptProcessingException()
+                        if image.ndim == 4:
+                            image = image.squeeze(0)
+                        img_np = np.clip(255.0 * image.cpu().numpy(), 0, 255).astype(np.uint8)
+                        if img_np.ndim == 2:
+                            img_np = np.stack([img_np] * 3, axis=-1)
+                        data = image2base64(img_np)
+                        
+                        frame_user_content = [
+                            {"type": "text", "text": prompt_text},
+                            {"type": "image_url", "image_url": {"url": f"data:image/jpeg;base64,{data}"}}
+                        ]
+                        frame_messages = messages + [{"role": "user", "content": frame_user_content}]
+                        frame_seed = self.sanitize_seed(base_seed, offset=i)
+                        try:
+                            output = LLAMA_CPP_STORAGE.llm.create_chat_completion(messages=frame_messages, seed=frame_seed, **final_params)
+                        except Exception as e:
+                            err_str = str(e)
+                            if "context limit" in err_str.lower() or "eval_chunk_single" in err_str.lower() or "failed to find a memory slot" in err_str.lower() or "error code 1" in err_str.lower():
+                                raise RuntimeError(
+                                    f"Multimodal Context Limit Exceeded ({e}).\n\n"
+                                    f"Your prompt and image generated more tokens than n_ctx={LLAMA_CPP_STORAGE.current_config.get('n_ctx', 8192)}.\n"
+                                    f"Qwen3.8 / Qwen3.6 / Qwen3.5 and M-RoPE models do not support context shifting in llama.cpp.\n"
+                                    f"👉 Solution: Please increase 'n_ctx' in the Llama-cpp Model Loader node (e.g. from {LLAMA_CPP_STORAGE.current_config.get('n_ctx', 8192)} to 16384 or 32768)."
+                                ) from e
+                            if "llama_decode failed" in err_str.lower() or "invalid input batch" in err_str.lower():
+                                raise RuntimeError(
+                                    f"Llama Decode Error ({e}).\n\n"
+                                    "If using a draft sidecar model (DFlash/DSpark/MTP), note that llama.cpp draft sidecars are text-only."
+                                ) from e
+                            raise e
+                        content = output['choices'][0]['message'].get('content', '') or ''
+                        text = content.removeprefix(": ").lstrip()
+                        out2.append(text)
+                        if len(frames) > 1:
+                            tmp_list.append(f"====== Image {i+1} ======")
+                        tmp_list.append(text)
+                        
+                    out1 = "\n\n".join(tmp_list)
+                else:
+                    base64_frames = []
+                    for img in frames:
+                        if len(frames) > 1:
+                            data = image2base64(scale_image(img, max_size))
+                        else:
+                            if img.ndim == 4:
+                                img = img.squeeze(0)
+                            img_np = np.clip(255.0 * img.cpu().numpy(), 0, 255).astype(np.uint8)
+                            if img_np.ndim == 2:
+                                img_np = np.stack([img_np] * 3, axis=-1)
+                            data = image2base64(img_np)
+                        base64_frames.append(f"data:image/jpeg;base64,{data}")
+
+                    if placeholders:
+                        last_idx = 0
+                        for match in placeholders:
+                            start, end = match.span()
+                            num = int(match.group(1))
+                            img_num = num if has_zero else num - 1
+                            
+                            text_chunk = prompt_text[last_idx:start]
+                            if text_chunk:
+                                user_content.append({"type": "text", "text": text_chunk})
+                            
+                            if 0 <= img_num < len(base64_frames):
+                                user_content.append({"type": "text", "text": f"\n<Picture {num}>:\n"})
+                                user_content.append({"type": "image_url", "image_url": {"url": base64_frames[img_num]}})
+                            else:
+                                user_content.append({"type": "text", "text": match.group(0)})
+                            last_idx = end
+                        
+                        remaining_text = prompt_text[last_idx:]
+                        if remaining_text:
+                            user_content.append({"type": "text", "text": remaining_text})
+                    else:
+                        user_content.append({"type": "text", "text": prompt_text})
+                        for idx, b64_url in enumerate(base64_frames):
+                            if len(base64_frames) > 1:
+                                tag_num = idx if has_zero else idx + 1
+                                user_content.append({"type": "text", "text": f"\n<Picture {tag_num}>:\n"})
+                            user_content.append({"type": "image_url", "image_url": {"url": b64_url}})
+
+                    messages.append({"role": "user", "content": user_content})
                     try:
-                        output = LLAMA_CPP_STORAGE.llm.create_chat_completion(messages=frame_messages, seed=frame_seed, **final_params)
+                        output = LLAMA_CPP_STORAGE.llm.create_chat_completion(messages=messages, seed=active_seed, **final_params)
                     except Exception as e:
                         err_str = str(e)
                         if "context limit" in err_str.lower() or "eval_chunk_single" in err_str.lower() or "failed to find a memory slot" in err_str.lower() or "error code 1" in err_str.lower():
                             raise RuntimeError(
                                 f"Multimodal Context Limit Exceeded ({e}).\n\n"
-                                f"Your prompt and image generated more tokens than n_ctx={LLAMA_CPP_STORAGE.current_config.get('n_ctx', 8192)}.\n"
+                                f"Your prompt and images generated more tokens than n_ctx={LLAMA_CPP_STORAGE.current_config.get('n_ctx', 8192)}.\n"
                                 f"Qwen3.8 / Qwen3.6 / Qwen3.5 and M-RoPE models do not support context shifting in llama.cpp.\n"
                                 f"👉 Solution: Please increase 'n_ctx' in the Llama-cpp Model Loader node (e.g. from {LLAMA_CPP_STORAGE.current_config.get('n_ctx', 8192)} to 16384 or 32768)."
                             ) from e
+                        if "llama_decode failed" in err_str.lower() or "invalid input batch" in err_str.lower():
+                            raise RuntimeError(
+                                f"Llama Decode Error ({e}).\n\n"
+                                "If using a draft sidecar model (DFlash/DSpark/MTP), note that llama.cpp draft sidecars are text-only."
+                            ) from e
                         raise e
                     content = output['choices'][0]['message'].get('content', '') or ''
-                    text = content.removeprefix(": ").lstrip()
-                    out2.append(text)
-                    if len(frames) > 1:
-                        tmp_list.append(f"====== Image {i+1} ======")
-                    tmp_list.append(text)
-                    
-                out1 = "\n\n".join(tmp_list)
+                    out1 = content.removeprefix(": ").lstrip()
+                    out2 = [out1]
             else:
-                base64_frames = []
-                for img in frames:
-                    if len(frames) > 1:
-                        data = image2base64(scale_image(img, max_size))
-                    else:
-                        if img.ndim == 4:
-                            img = img.squeeze(0)
-                        img_np = np.clip(255.0 * img.cpu().numpy(), 0, 255).astype(np.uint8)
-                        if img_np.ndim == 2:
-                            img_np = np.stack([img_np] * 3, axis=-1)
-                        data = image2base64(img_np)
-                    base64_frames.append(f"data:image/jpeg;base64,{data}")
-
-                if placeholders:
-                    last_idx = 0
-                    for match in placeholders:
-                        start, end = match.span()
-                        num = int(match.group(1))
-                        img_num = num if has_zero else num - 1
-                        
-                        text_chunk = prompt_text[last_idx:start]
-                        if text_chunk:
-                            user_content.append({"type": "text", "text": text_chunk})
-                        
-                        if 0 <= img_num < len(base64_frames):
-                            user_content.append({"type": "text", "text": f"\n<Picture {num}>:\n"})
-                            user_content.append({"type": "image_url", "image_url": {"url": base64_frames[img_num]}})
-                        else:
-                            user_content.append({"type": "text", "text": match.group(0)})
-                        last_idx = end
-                    
-                    remaining_text = prompt_text[last_idx:]
-                    if remaining_text:
-                        user_content.append({"type": "text", "text": remaining_text})
-                else:
-                    user_content.append({"type": "text", "text": prompt_text})
-                    for idx, b64_url in enumerate(base64_frames):
-                        if len(base64_frames) > 1:
-                            tag_num = idx if has_zero else idx + 1
-                            user_content.append({"type": "text", "text": f"\n<Picture {tag_num}>:\n"})
-                        user_content.append({"type": "image_url", "image_url": {"url": b64_url}})
-
+                user_content.append({"type": "text", "text": prompt_text})
                 messages.append({"role": "user", "content": user_content})
                 try:
                     output = LLAMA_CPP_STORAGE.llm.create_chat_completion(messages=messages, seed=active_seed, **final_params)
@@ -973,28 +1025,22 @@ class llama_cpp_instruct_adv:
                             f"Qwen3.8 / Qwen3.6 / Qwen3.5 and M-RoPE models do not support context shifting in llama.cpp.\n"
                             f"👉 Solution: Please increase 'n_ctx' in the Llama-cpp Model Loader node (e.g. from {LLAMA_CPP_STORAGE.current_config.get('n_ctx', 8192)} to 16384 or 32768)."
                         ) from e
+                    if "llama_decode failed" in err_str.lower() or "invalid input batch" in err_str.lower():
+                        raise RuntimeError(
+                            f"Llama Decode Error ({e}).\n\n"
+                            "If using a draft sidecar model (DFlash/DSpark/MTP), note that llama.cpp draft sidecars are text-only."
+                        ) from e
                     raise e
                 content = output['choices'][0]['message'].get('content', '') or ''
                 out1 = content.removeprefix(": ").lstrip()
                 out2 = [out1]
-        else:
-            user_content.append({"type": "text", "text": prompt_text})
-            messages.append({"role": "user", "content": user_content})
-            try:
-                output = LLAMA_CPP_STORAGE.llm.create_chat_completion(messages=messages, seed=active_seed, **final_params)
-            except Exception as e:
-                err_str = str(e)
-                if "context limit" in err_str.lower() or "eval_chunk_single" in err_str.lower() or "failed to find a memory slot" in err_str.lower() or "error code 1" in err_str.lower():
-                    raise RuntimeError(
-                        f"Multimodal Context Limit Exceeded ({e}).\n\n"
-                        f"Your prompt and images generated more tokens than n_ctx={LLAMA_CPP_STORAGE.current_config.get('n_ctx', 8192)}.\n"
-                        f"Qwen3.8 / Qwen3.6 / Qwen3.5 and M-RoPE models do not support context shifting in llama.cpp.\n"
-                        f"👉 Solution: Please increase 'n_ctx' in the Llama-cpp Model Loader node (e.g. from {LLAMA_CPP_STORAGE.current_config.get('n_ctx', 8192)} to 16384 or 32768)."
-                    ) from e
-                raise e
-            content = output['choices'][0]['message'].get('content', '') or ''
-            out1 = content.removeprefix(": ").lstrip()
-            out2 = [out1]
+        finally:
+            if bypass_spec and spec_engine is not None:
+                try:
+                    spec_engine.clear()
+                except Exception:
+                    pass
+                LLAMA_CPP_STORAGE.llm.speculative = spec_engine
 
         out1 = strip_think_block(out1)
             
