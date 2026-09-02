@@ -10,3 +10,4 @@ checkpoints/
 .env*
 secrets/
 .agents/
+GEMINI.md
