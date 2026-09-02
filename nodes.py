@@ -1580,7 +1580,6 @@ class remove_code_block:
 
 PRESET_LOOKUP = {
     "Qwen-Image [EN]": getattr(preset_mod, "QWEN_IMAGE_EN", ""),
-    "Qwen-Image [ZH]": getattr(preset_mod, "QWEN_IMAGE_ZH", ""),
     "Qwen-Image 2512 [EN]": getattr(preset_mod, "QWEN_IMAGE_2512_EN", ""),
     "Qwen-Image-Edit": getattr(preset_mod, "QWEN_IMAGE_EDIT", ""),
     "Qwen-Image-Edit 2509": getattr(preset_mod, "QWEN_IMAGE_EDIT_2509", ""),

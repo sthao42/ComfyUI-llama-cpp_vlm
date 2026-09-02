@@ -346,6 +346,7 @@ class TestComfyUILlamaCppVLM(unittest.TestCase):
             self.assertNotIn("wan", p.lower())
         # Verify removed presets
         self.assertNotIn("Qwen-Image 2512 [ZH]", presets)
+        self.assertNotIn("Qwen-Image [ZH]", presets)
         # Verify core image presets are present
         self.assertIn("Qwen-Image [EN]", presets)
         self.assertIn("Flux.2 T2I", presets)
@@ -359,6 +360,8 @@ class TestComfyUILlamaCppVLM(unittest.TestCase):
             preset_node.main("Wan T2V [EN]")
         with self.assertRaises(ValueError):
             preset_node.main("Qwen-Image 2512 [ZH]")
+        with self.assertRaises(ValueError):
+            preset_node.main("Qwen-Image [ZH]")
 
 
 if __name__ == '__main__':
