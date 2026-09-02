@@ -635,8 +635,16 @@ class llama_cpp_model_loader:
                 "min": -1, "max": 1024, "step": 1,
                 "tooltip": "VRAM usage limit in GB (-1 = no limit)\nReference range; actual usage may slightly exceed."
             }),
-            "image_min_tokens": ("INT", {"default": 0, "min": 0, "max": 4096, "step": 32}),
-            "image_max_tokens": ("INT", {"default": 0, "min": 0, "max": 4096, "step": 32}),
+            "image_min_tokens": ("INT", {
+                "default": 1024,
+                "min": 0, "max": 16384, "step": 32,
+                "tooltip": "Minimum image tokens allocated per image patch."
+            }),
+            "image_max_tokens": ("INT", {
+                "default": 4096,
+                "min": 0, "max": 32768, "step": 32,
+                "tooltip": "Maximum image tokens allocated per image patch."
+            }),
             "n_batch": ("INT", {
                 "default": 2048,
                 "min": 128, "max": 327680, "step": 64,
@@ -686,7 +694,7 @@ class llama_cpp_model_loader:
     FUNCTION = "loadmodel"
     CATEGORY = "llama-cpp-vlm"
     
-    def loadmodel(self, model, mmproj, chat_handler, n_ctx, vram_limit, image_min_tokens, image_max_tokens, n_batch=2048, n_ubatch=512, enable_mtp=False, flash_attn=True, offload_kqv=True, kv_cache_type="f16", n_threads=0, speculative_mode="auto", draft_model="None"):
+    def loadmodel(self, model, mmproj="None", chat_handler="None", n_ctx=16384, vram_limit=-1, image_min_tokens=1024, image_max_tokens=4096, n_batch=2048, n_ubatch=512, enable_mtp=False, flash_attn=True, offload_kqv=True, kv_cache_type="f16", n_threads=0, speculative_mode="auto", draft_model="None"):
         custom_config = {
             "model": model,
             "mmproj": mmproj,

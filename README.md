@@ -2,7 +2,6 @@
 
 An advanced, high-performance ComfyUI custom node suite for running Large Language Models (LLMs) and Vision-Language Models (VLMs) natively based on [`llama.cpp`](https://github.com/ggerganov/llama.cpp) and [`llama-cpp-python`](https://github.com/JamePeng/llama-cpp-python).
 
-**[[📃 中文版](./README_zh.md)]**
 
 ---
 

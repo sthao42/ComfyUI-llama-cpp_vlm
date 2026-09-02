@@ -104,6 +104,9 @@ class TestComfyUILlamaCppVLM(unittest.TestCase):
                     'offload_kqv', 'kv_cache_type', 'n_threads']
         for key in expected:
             self.assertIn(key, required_keys, f"Missing {key} in model loader required inputs")
+        self.assertEqual(inputs['required']['n_ctx'][1]['default'], 16384)
+        self.assertEqual(inputs['required']['image_min_tokens'][1]['default'], 1024)
+        self.assertEqual(inputs['required']['image_max_tokens'][1]['default'], 4096)
 
     def test_parameters_node_processing(self):
         params_node = nodes.llama_cpp_parameters()
