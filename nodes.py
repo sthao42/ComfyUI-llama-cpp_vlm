@@ -739,7 +739,7 @@ class llama_cpp_instruct_adv:
                     "tooltip": 'Number of frames to sample evenly from input video.\n(for "video" mode only)'
                 }),
                 "max_size": ("INT", {
-                    "default": 256,
+                    "default": 4096,
                     "min": 128,
                     "max": 16384,
                     "step": 64,

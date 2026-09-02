@@ -129,6 +129,7 @@ class TestComfyUILlamaCppVLM(unittest.TestCase):
             self.assertIn(f'image_{i}', optional_keys)
         self.assertIn('video_0', optional_keys)
         self.assertNotIn('video_1', optional_keys)
+        self.assertEqual(inputs['required']['max_size'][1]['default'], 4096)
 
     def test_scale_image_safety(self):
         tensor_4d = torch.zeros(1, 256, 256, 3)
