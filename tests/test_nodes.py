@@ -351,10 +351,14 @@ class TestComfyUILlamaCppVLM(unittest.TestCase):
         self.assertIn("Qwen-Image [EN]", presets)
         self.assertIn("Flux.2 T2I", presets)
         self.assertIn("Z-Image Turbo", presets)
+        self.assertIn("Krea 2 T2I", presets)
         # Verify functionality
         res = preset_node.main("Flux.2 T2I")
         self.assertIsInstance(res, tuple)
         self.assertTrue(len(res[0]) > 0)
+        res_krea = preset_node.main("Krea 2 T2I")
+        self.assertIsInstance(res_krea, tuple)
+        self.assertIn("expert prompt engineer for text-to-image models", res_krea[0])
         # Verify unknown preset raises ValueError
         with self.assertRaises(ValueError):
             preset_node.main("Wan T2V [EN]")

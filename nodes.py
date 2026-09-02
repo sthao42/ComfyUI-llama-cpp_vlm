@@ -1587,6 +1587,7 @@ PRESET_LOOKUP = {
     "Z-Image Turbo": getattr(preset_mod, "ZIMAGE_TURBO", ""),
     "Flux.2 T2I": getattr(preset_mod, "FLUX2_T2I", ""),
     "Flux.2 I2I": getattr(preset_mod, "FLUX2_I2I", ""),
+    "Krea 2 T2I": getattr(preset_mod, "KREA2_T2I", ""),
 }
 
 class PromptEnhancerPreset:
