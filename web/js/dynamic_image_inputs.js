@@ -2,7 +2,8 @@ import { app } from "../../scripts/app.js";
 
 const TARGET_CLASSES = new Set([
     "llama_cpp_instruct_adv",
-    "Llama-cpp Instruct"
+    "Llama-cpp Instruct",
+    "Llama-cpp Instruct (Advanced)"
 ]);
 
 const MAX_SOCKETS = 9;

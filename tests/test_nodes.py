@@ -108,6 +108,9 @@ class TestComfyUILlamaCppVLM(unittest.TestCase):
         self.assertEqual(inputs['required']['image_min_tokens'][1]['default'], 1024)
         self.assertEqual(inputs['required']['image_max_tokens'][1]['default'], 4096)
 
+    def test_node_display_name_mappings(self):
+        self.assertEqual(nodes.NODE_DISPLAY_NAME_MAPPINGS.get("llama_cpp_instruct_adv"), "Llama-cpp Instruct (Advanced)")
+
     def test_parameters_node_processing(self):
         params_node = nodes.llama_cpp_parameters()
         raw = {
