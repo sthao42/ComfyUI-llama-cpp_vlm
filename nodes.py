@@ -166,6 +166,12 @@ try:
 except Exception:
     Step3VLChatHandler = None
 
+try:
+    from llama_cpp.llama_chat_format import GenericMTMDChatHandler
+    chat_handlers += ["Generic-MTMD"]
+except Exception:
+    GenericMTMDChatHandler = None
+
 class AnyType(str):
     def __ne__(self, __value: object) -> bool:
         return False
@@ -258,6 +264,8 @@ class LLAMA_CPP_STORAGE:
                     return PaddleOCRChatHandler
                 case "Step3-VL":
                     return Step3VLChatHandler
+                case "Generic-MTMD":
+                    return GenericMTMDChatHandler
                 case "None":
                     return None
                 case _:
@@ -313,6 +321,8 @@ class LLAMA_CPP_STORAGE:
                 kwargs["mmproj_path"] = mmproj_path
             else:
                 kwargs["clip_model_path"] = mmproj_path
+            if "chat_format" in handler_params:
+                kwargs["chat_format"] = None
             if chat_handler in ["Qwen3-VL", "Qwen3-VL-Thinking"]:
                 kwargs["force_reasoning"] = think_mode
                 kwargs["image_max_tokens"] = image_max_tokens
@@ -373,24 +383,66 @@ class LLAMA_CPP_STORAGE:
         if n_threads > 0 and "n_threads" in llama_init_params:
             llama_kwargs["n_threads"] = n_threads
             
-        if enable_mtp:
+        enable_mtp = config.get("enable_mtp", False)
+        speculative_mode = config.get("speculative_mode", "auto")
+        draft_model = config.get("draft_model", "None")
+        draft_model_path = ""
+        if draft_model and draft_model != "None":
+            draft_model_path = get_safe_model_path(llm_dir, draft_model)
+
+        has_spec = enable_mtp or (speculative_mode != "auto") or bool(draft_model_path)
+        if has_spec:
             try:
                 from llama_cpp.llama_speculative import SpecConfig, SpeculativeType
-                if "speculative" in llama_init_params:
-                    llama_kwargs["speculative"] = SpecConfig(spec_type=SpeculativeType.NGRAM_MAP_K)
-                    print("[llama-cpp_vlm] Multi-Token Prediction (MTP / Speculative Decoding) enabled using SpecConfig (NGRAM_MAP_K).")
-                else:
-                    from llama_cpp.llama_speculative import LlamaNGramMapDecoding
-                    llama_kwargs["draft_model"] = LlamaNGramMapDecoding(spec_type=SpeculativeType.NGRAM_MAP_K)
-                    print("[llama-cpp_vlm] Multi-Token Prediction (MTP / Speculative Decoding) enabled using LlamaNGramMapDecoding.")
+                resolved_type = None
+
+                if speculative_mode == "DFlash":
+                    resolved_type = getattr(SpeculativeType, "DRAFT_DFLASH", None)
+                elif speculative_mode == "DSpark":
+                    resolved_type = getattr(SpeculativeType, "DRAFT_DSPARK", None)
+                elif speculative_mode == "MTP":
+                    resolved_type = getattr(SpeculativeType, "DRAFT_MTP", None)
+                elif speculative_mode == "NGRAM":
+                    resolved_type = getattr(SpeculativeType, "NGRAM_MAP_K", None)
+                elif speculative_mode == "auto":
+                    if draft_model_path:
+                        dm_lower = draft_model.lower()
+                        if "dspark" in dm_lower:
+                            resolved_type = getattr(SpeculativeType, "DRAFT_DSPARK", SpeculativeType.DRAFT_DFLASH)
+                        elif "mtp" in dm_lower:
+                            resolved_type = getattr(SpeculativeType, "DRAFT_MTP", SpeculativeType.DRAFT_DFLASH)
+                        else:
+                            resolved_type = getattr(SpeculativeType, "DRAFT_DFLASH", getattr(SpeculativeType, "DRAFT_MTP", SpeculativeType.NGRAM_MAP_K))
+                    elif enable_mtp:
+                        resolved_type = SpeculativeType.NGRAM_MAP_K
+
+                if resolved_type is not None and resolved_type != SpeculativeType.NONE:
+                    spec_kwargs = {"spec_type": resolved_type}
+                    if draft_model_path and resolved_type in {
+                        getattr(SpeculativeType, "DRAFT_DFLASH", None),
+                        getattr(SpeculativeType, "DRAFT_DSPARK", None),
+                        getattr(SpeculativeType, "DRAFT_MTP", None),
+                        getattr(SpeculativeType, "DRAFT_SIMPLE", None),
+                    }:
+                        spec_kwargs["draft_model_path"] = draft_model_path
+                        spec_kwargs["draft_n_max"] = 8
+
+                    if "speculative" in llama_init_params:
+                        llama_kwargs["speculative"] = SpecConfig(**spec_kwargs)
+                        print(f"[llama-cpp_vlm] Speculative Decoding enabled using SpecConfig ({resolved_type.name})"
+                              f"{f' with draft model: {draft_model}' if draft_model_path else ''}.")
+                    else:
+                        from llama_cpp.llama_speculative import LlamaNGramMapDecoding
+                        llama_kwargs["draft_model"] = LlamaNGramMapDecoding(spec_type=resolved_type)
+                        print(f"[llama-cpp_vlm] Speculative Decoding enabled using LlamaNGramMapDecoding ({resolved_type.name}).")
             except Exception as e:
                 # Fallback for older llama-cpp-python versions
                 try:
                     from llama_cpp.llama_speculative import LlamaNGramMapDecoding
                     llama_kwargs["draft_model"] = LlamaNGramMapDecoding()
-                    print("[llama-cpp_vlm] Multi-Token Prediction (MTP / Speculative Decoding) enabled using legacy LlamaNGramMapDecoding.")
+                    print(f"[llama-cpp_vlm] Speculative Decoding fallback to legacy LlamaNGramMapDecoding: {e}")
                 except Exception as e2:
-                    print(f"[llama-cpp_vlm] Warning: MTP (speculative decoding) failed to initialize: {e} / {e2}")
+                    print(f"[llama-cpp_vlm] Warning: Speculative decoding failed to initialize: {e} / {e2}")
 
         cls.llm = Llama(**llama_kwargs)
 
@@ -564,6 +616,7 @@ class llama_cpp_model_loader:
         all_llms = folder_paths.get_filename_list("LLM")
         model_list = [f for f in all_llms if "mmproj" not in f.lower()]
         mmproj_list = ["None"]+[f for f in all_llms if "mmproj" in f.lower()]
+        draft_model_list = ["None"] + [f for f in all_llms if "mmproj" not in f.lower()]
             
         return {"required": {
             "model": (model_list,),
@@ -593,7 +646,7 @@ class llama_cpp_model_loader:
             }),
             "enable_mtp": ("BOOLEAN", {
                 "default": False,
-                "tooltip": "Enable Multi-Token Prediction (MTP / Speculative Decoding) using SpecConfig (NGRAM_MAP_K) to accelerate token generation."
+                "tooltip": "Enable Multi-Token Prediction (MTP / Speculative Decoding) using SpecConfig (NGRAM or DFlash/DSpark draft sidecars) to accelerate token generation."
             }),
             "flash_attn": ("BOOLEAN", {
                 "default": True,
@@ -612,6 +665,16 @@ class llama_cpp_model_loader:
                 "min": 0, "max": 128, "step": 1,
                 "tooltip": "CPU threads for token generation (0 = auto-detect)."
             }),
+            },
+            "optional": {
+                "speculative_mode": (["auto", "NGRAM", "DFlash", "DSpark", "MTP"], {
+                    "default": "auto",
+                    "tooltip": "Speculative decoding mode. 'auto' selects DFlash/MTP if draft_model is provided, or NGRAM if enable_mtp is True."
+                }),
+                "draft_model": (draft_model_list, {
+                    "default": "None",
+                    "tooltip": "Optional draft / sidecar model for DFlash / DSpark / MTP speculative decoding (llama.cpp 0.3.49+)."
+                }),
             }
         }
 
@@ -620,7 +683,7 @@ class llama_cpp_model_loader:
     FUNCTION = "loadmodel"
     CATEGORY = "llama-cpp-vlm"
     
-    def loadmodel(self, model, mmproj, chat_handler, n_ctx, vram_limit, image_min_tokens, image_max_tokens, n_batch=2048, n_ubatch=512, enable_mtp=False, flash_attn=True, offload_kqv=True, kv_cache_type="f16", n_threads=0):
+    def loadmodel(self, model, mmproj, chat_handler, n_ctx, vram_limit, image_min_tokens, image_max_tokens, n_batch=2048, n_ubatch=512, enable_mtp=False, flash_attn=True, offload_kqv=True, kv_cache_type="f16", n_threads=0, speculative_mode="auto", draft_model="None"):
         custom_config = {
             "model": model,
             "mmproj": mmproj,
@@ -635,7 +698,9 @@ class llama_cpp_model_loader:
             "flash_attn": flash_attn,
             "offload_kqv": offload_kqv,
             "kv_cache_type": kv_cache_type,
-            "n_threads": n_threads
+            "n_threads": n_threads,
+            "speculative_mode": speculative_mode,
+            "draft_model": draft_model
         }
         if not LLAMA_CPP_STORAGE.llm or LLAMA_CPP_STORAGE.current_config != custom_config:
             print("[llama-cpp_vlm] Loading model...")
@@ -752,9 +817,6 @@ class llama_cpp_instruct_adv:
         
         if parameters is None:
             parameters = {}
-        
-        if _MTMD:
-            parameters.pop("present_penalty", None)
             
         _uid = parameters.get("state_uid", None)
         _parameters = parameters.copy()
@@ -990,6 +1052,10 @@ class llama_cpp_parameters:
                     "default": -1, "min": -1, "max": 999999, "step": 1,
                     "tooltip": "Use a specific ID to save the conversation state.\n(-1 = use node's unique_id)"
                 }),
+            },
+            "optional": {
+                "dry_multiplier": ("FLOAT", {"default": 0.0, "min": 0.0, "max": 5.0, "step": 0.05, "tooltip": "DRY (Don't Repeat Yourself) repetition penalty multiplier (0.0 = disabled, e.g. 0.8). In llama-cpp-python 0.3.49 dry_penalty_last_n defaults to 64."}),
+                "ignore_eos": ("BOOLEAN", {"default": False, "tooltip": "Suppress end-of-generation tokens and continue generation until context or max_tokens."}),
             }
         }
     RETURN_TYPES = ("LLAMACPPARAMS",)
@@ -1014,6 +1080,12 @@ class llama_cpp_parameters:
 
         if kwargs.get("reasoning_budget", -1) in (-1, 0):
             kwargs.pop("reasoning_budget", None)
+
+        if kwargs.get("dry_multiplier", 0.0) == 0.0:
+            kwargs.pop("dry_multiplier", None)
+
+        if not kwargs.get("ignore_eos", False):
+            kwargs.pop("ignore_eos", None)
 
         return (kwargs,)
     

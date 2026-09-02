@@ -57,7 +57,8 @@ if "llama_cpp" not in sys.modules:
         "Qwen25VLChatHandler", "Qwen3VLChatHandler", "Qwen35ChatHandler", "Qwen38ChatHandler",
         "GLM46VChatHandler", "LFM2VLChatHandler", "GLM41VChatHandler",
         "LFM25VLChatHandler", "GraniteDoclingChatHandler", "MiniCPMv45ChatHandler",
-        "MiniCPMv46ChatHandler", "PaddleOCRChatHandler", "Qwen3ASRChatHandler", "Step3VLChatHandler"
+        "MiniCPMv46ChatHandler", "PaddleOCRChatHandler", "Qwen3ASRChatHandler", "Step3VLChatHandler",
+        "GenericMTMDChatHandler"
     ]:
         setattr(chat_fmt, h_name, DummyHandler)
     llama_cpp.llama_chat_format = chat_fmt
@@ -219,6 +220,72 @@ class TestComfyUILlamaCppVLM(unittest.TestCase):
         spec = captured_kwargs["speculative"]
         self.assertIsInstance(spec, SpecConfig)
         self.assertEqual(spec.spec_type, SpeculativeType.NGRAM_MAP_K)
+
+    def test_generic_mtmd_chat_handler_registered(self):
+        self.assertIn("Generic-MTMD", nodes.chat_handlers)
+
+    def test_model_loader_dflash_speculative(self):
+        loader = nodes.llama_cpp_model_loader()
+        captured_kwargs = {}
+        def mock_init(self, model_path=None, chat_handler=None, n_gpu_layers=None, n_ctx=None, n_batch=None, n_ubatch=None, speculative=None, draft_model=None, **kwargs):
+            captured_kwargs.update(kwargs)
+            if speculative is not None:
+                captured_kwargs["speculative"] = speculative
+            if draft_model is not None:
+                captured_kwargs["draft_model"] = draft_model
+        orig_init = nodes.Llama.__init__
+        try:
+            nodes.Llama.__init__ = mock_init
+            loader.loadmodel(
+                model="target_model.gguf",
+                mmproj="None",
+                chat_handler="None",
+                n_ctx=4096,
+                vram_limit=-1,
+                image_min_tokens=0,
+                image_max_tokens=0,
+                speculative_mode="DFlash",
+                draft_model="draft_dflash.gguf"
+            )
+        finally:
+            nodes.Llama.__init__ = orig_init
+
+        from llama_cpp.llama_speculative import SpecConfig, SpeculativeType
+        self.assertIn("speculative", captured_kwargs)
+        spec = captured_kwargs["speculative"]
+        self.assertIsInstance(spec, SpecConfig)
+        self.assertEqual(spec.spec_type, SpeculativeType.DRAFT_DFLASH)
+        self.assertTrue(hasattr(spec, "draft_model_path"))
+
+    def test_parameters_node_dry_and_ignore_eos(self):
+        params_node = nodes.llama_cpp_parameters()
+        raw = {
+            "max_tokens": 2048,
+            "presence_penalty": 0.5,
+            "dry_multiplier": 0.8,
+            "ignore_eos": True
+        }
+        res = params_node.process(**raw)[0]
+        self.assertEqual(res["presence_penalty"], 0.5)
+        self.assertEqual(res["dry_multiplier"], 0.8)
+        self.assertTrue(res["ignore_eos"])
+
+        # Check default suppression
+        raw_default = {
+            "max_tokens": 2048,
+            "dry_multiplier": 0.0,
+            "ignore_eos": False
+        }
+        res_default = params_node.process(**raw_default)[0]
+        self.assertNotIn("dry_multiplier", res_default)
+        self.assertNotIn("ignore_eos", res_default)
+
+    def test_requirements_version(self):
+        req_path = os.path.join(REPO_ROOT, "requirements.txt")
+        with open(req_path, "r", encoding="utf-8") as f:
+            content = f.read()
+        self.assertIn("0.3.49", content)
+        self.assertNotIn("0.3.48", content)
 
 
 if __name__ == '__main__':
