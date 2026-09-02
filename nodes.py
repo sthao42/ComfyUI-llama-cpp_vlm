@@ -882,15 +882,16 @@ class llama_cpp_instruct_adv:
             for msg in messages
         )
 
-        # Model-backed draft sidecars (DFlash, DSpark, MTP) in llama.cpp only support text sequences.
-        # When multimodal image tokens are evaluated, their 4D M-RoPE positions cannot be mapped to the draft context,
-        # which causes llama_decode (code -1) in draft_context.
-        # We automatically bypass model-backed draft engines for multimodal calls, keeping them active for text-only calls.
+        # Speculative Decoding engines (both model-backed like DFlash/DSpark/MTP and N-gram like NGRAM_MAP_K)
+        # in llama.cpp / llama-cpp-python are strictly text-only.
+        # In multimodal requests, MTMD evaluates visual tokens as negative reverse-vocabulary token IDs (e.g. -9083822).
+        # When speculative decoding is active, llama.generate() attempts to re-evaluate prompt_prefix through llama.eval(),
+        # which clears the multimodal KV cache and triggers ValueError: invalid negative token id or llama_decode failures.
+        # We automatically bypass the speculative engine during multimodal requests and cleanly restore it afterwards.
         spec_engine = getattr(LLAMA_CPP_STORAGE.llm, "speculative", None)
-        has_draft_ctx = spec_engine is not None and getattr(spec_engine, "draft_context", None) is not None
-        bypass_spec = has_media and has_draft_ctx
+        bypass_spec = has_media and spec_engine is not None
         if bypass_spec:
-            print("[llama-cpp_vlm] Multimodal input detected: llama.cpp model-backed draft sidecars (DFlash/DSpark/MTP) are text-only; automatically bypassing draft model for this multimodal request.")
+            print("[llama-cpp_vlm] Multimodal input detected: llama.cpp speculative decoding (NGRAM / DFlash / DSpark / MTP) is text-only; automatically bypassing speculation for this multimodal request.")
             LLAMA_CPP_STORAGE.llm.speculative = None
 
         try:
@@ -1010,10 +1011,10 @@ class llama_cpp_instruct_adv:
                                 f"Qwen3.8 / Qwen3.6 / Qwen3.5 and M-RoPE models do not support context shifting in llama.cpp.\n"
                                 f"👉 Solution: Please increase 'n_ctx' in the Llama-cpp Model Loader node (e.g. from {LLAMA_CPP_STORAGE.current_config.get('n_ctx', 8192)} to 16384 or 32768)."
                             ) from e
-                        if "llama_decode failed" in err_str.lower() or "invalid input batch" in err_str.lower():
+                        if "llama_decode failed" in err_str.lower() or "invalid input batch" in err_str.lower() or "invalid negative token id" in err_str.lower():
                             raise RuntimeError(
                                 f"Llama Decode Error ({e}).\n\n"
-                                "If using a draft sidecar model (DFlash/DSpark/MTP), note that llama.cpp draft sidecars are text-only."
+                                "Speculative decoding engines (NGRAM / DFlash / DSpark / MTP) in llama.cpp are strictly text-only."
                             ) from e
                         raise e
                     content = output['choices'][0]['message'].get('content', '') or ''
@@ -1033,10 +1034,10 @@ class llama_cpp_instruct_adv:
                             f"Qwen3.8 / Qwen3.6 / Qwen3.5 and M-RoPE models do not support context shifting in llama.cpp.\n"
                             f"👉 Solution: Please increase 'n_ctx' in the Llama-cpp Model Loader node (e.g. from {LLAMA_CPP_STORAGE.current_config.get('n_ctx', 8192)} to 16384 or 32768)."
                         ) from e
-                    if "llama_decode failed" in err_str.lower() or "invalid input batch" in err_str.lower():
+                    if "llama_decode failed" in err_str.lower() or "invalid input batch" in err_str.lower() or "invalid negative token id" in err_str.lower():
                         raise RuntimeError(
                             f"Llama Decode Error ({e}).\n\n"
-                            "If using a draft sidecar model (DFlash/DSpark/MTP), note that llama.cpp draft sidecars are text-only."
+                            "Speculative decoding engines (NGRAM / DFlash / DSpark / MTP) in llama.cpp are strictly text-only."
                         ) from e
                     raise e
                 content = output['choices'][0]['message'].get('content', '') or ''

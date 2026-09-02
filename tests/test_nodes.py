@@ -341,6 +341,56 @@ class TestComfyUILlamaCppVLM(unittest.TestCase):
             nodes.LLAMA_CPP_STORAGE.chat_handler = orig_handler
             nodes.LLAMA_CPP_STORAGE.current_config = orig_config
 
+    def test_multimodal_bypasses_ngram_speculative(self):
+        inst = nodes.llama_cpp_instruct_adv()
+        class DummyNGramEngine:
+            # N-Gram engines (NGRAM_MAP_K) do NOT have draft_context
+            def clear(self):
+                pass
+
+        class MockLlamaWithNGramSpec:
+            def __init__(self):
+                self.speculative = DummyNGramEngine()
+                self.observed_speculative_during_call = "unset"
+            def create_chat_completion(self, messages=None, **kwargs):
+                self.observed_speculative_during_call = self.speculative
+                return {"choices": [{"message": {"content": "response"}}]}
+
+        mock_llm = MockLlamaWithNGramSpec()
+        orig_llm = nodes.LLAMA_CPP_STORAGE.llm
+        orig_handler = nodes.LLAMA_CPP_STORAGE.chat_handler
+        orig_config = nodes.LLAMA_CPP_STORAGE.current_config
+        try:
+            nodes.LLAMA_CPP_STORAGE.llm = mock_llm
+            class DummyChatHandler:
+                mmproj_path = "fake_mmproj.gguf"
+            nodes.LLAMA_CPP_STORAGE.chat_handler = DummyChatHandler()
+            nodes.LLAMA_CPP_STORAGE.current_config = {"n_ctx": 4096}
+
+            dummy_img = torch.zeros(1, 64, 64, 3)
+            res = inst.process(
+                llama_model={"n_ctx": 4096},
+                preset_prompt="Normal - Describe",
+                custom_prompt="test",
+                system_prompt="",
+                inference_mode="images",
+                max_frames=1,
+                max_size=64,
+                seed=42,
+                force_offload=False,
+                save_states=False,
+                unique_id="1",
+                image_0=dummy_img
+            )
+            # Speculative engine should be temporarily None during multimodal generation
+            self.assertIsNone(mock_llm.observed_speculative_during_call)
+            # And cleanly restored after execution
+            self.assertIsNotNone(mock_llm.speculative)
+        finally:
+            nodes.LLAMA_CPP_STORAGE.llm = orig_llm
+            nodes.LLAMA_CPP_STORAGE.chat_handler = orig_handler
+            nodes.LLAMA_CPP_STORAGE.current_config = orig_config
+
     def test_prompt_enhancer_preset_no_wan(self):
         preset_node = nodes.PromptEnhancerPreset()
         input_types = nodes.PromptEnhancerPreset.INPUT_TYPES()
