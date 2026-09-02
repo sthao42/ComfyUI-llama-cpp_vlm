@@ -8,7 +8,7 @@ An advanced, high-performance ComfyUI custom node suite for running Large Langua
 
 ### 🖼️ Multi-Image & Video Tagging Workflows
 * **Dedicated Dynamic Sockets (`image_0`..`image_8`, `video_0`):** Features 9 reference image inputs and a dedicated video input with smooth dynamic canvas expansion.
-* **Inline Tagging & Placeholder Interleaving:** Reference specific images directly in your prompt using tags like `<Picture 0>`, `<Picture 1>`, `<image_0>`, `<image_1>`. Visual tokens are placed at exact placeholder positions.
+* **Inline Tagging & Placeholder Interleaving:** Reference specific images directly in your prompt using tags like `<Picture 1>`, `<Picture 2>`, `<image_0>`, `<image_1>`. Visual tokens are placed at exact placeholder positions.
 * **Ultra-High Resolution (`max_size = 4096`):** Supports high-resolution image inputs out of the box without downscaling artifacts.
 
 ### 🤖 Broad VLM & LLM Model Support
@@ -26,7 +26,7 @@ An advanced, high-performance ComfyUI custom node suite for running Large Langua
 * **`Krea 2 T2I`:** Expert step-by-step reasoning prompt expander tailored for Krea 2 and next-generation T2I models.
 * **`Flux.2 T2I` & `Flux.2 I2I`:** Clean visual prompt engineering and precise editing instructions for FLUX.2.
 * **`Z-Image Turbo`:** Structured aesthetic prompt expansion.
-* **`Qwen-Image` Suite:** High-quality English prompt expansion and editing presets (`Qwen-Image [EN]`, `Qwen-Image 2512 [EN]`, `Qwen-Image-Edit`).
+* **`Qwen-Image` Suite:** High-quality English prompt expansion and editing presets (`Qwen-Image`, `Qwen-Image 2512`, `Qwen-Image-Edit`).
 
 ---
 
@@ -72,7 +72,7 @@ python -m pip install -r ComfyUI-llama-cpp_vlm/requirements.txt
 * **`enable_mtp`**: Enable speculative decoding using `SpecConfig`.
 
 ### `llama_cpp_instruct_adv` (Llama-cpp Instruct (Advanced))
-* **`image_0`..`image_8`**: Connect reference images. Dynamic sockets reveal up to 9 images automatically.
+* **`image_0`..`image_8`**: Connect reference images.
 * **`video_0`**: Connect input video batches for temporal understanding.
 * **`custom_prompt`**: Input prompt text. Supports `<Picture 0>`, `<image_0>` tags for inline placement.
 * **`preset_prompt`**: Built-in prompts for captioning, tagging, or multi-image comparison.
