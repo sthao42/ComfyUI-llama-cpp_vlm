@@ -3,7 +3,7 @@ import sys
 import types
 import unittest
 import torch
-import numpy as np
+
 
 REPO_ROOT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 if REPO_ROOT not in sys.path:

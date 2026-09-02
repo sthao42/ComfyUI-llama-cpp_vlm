@@ -66,8 +66,8 @@ def get_layer_count(path: str) -> Optional[int]:
             if magic != b"GGUF":
                 raise ValueError("Not a valid GGUF binary file.")
 
-            _version = read_u32(f)
-            _tensor_count = read_u64(f)
+            _version = read_u32(f)  # noqa: F841
+            _tensor_count = read_u64(f)  # noqa: F841
             kv_count = read_u64(f)
             meta = {}
 
@@ -79,8 +79,8 @@ def get_layer_count(path: str) -> Optional[int]:
         for k, v in meta.items():
             if k.lower().endswith(".block_count"):
                 return int(v)
-    except Exception:
-        pass
+    except Exception as e:
+        print(f"[llama-cpp_vlm] Warning parsing GGUF manually: {e}")
 
     try:
         from gguf import GGUFReader

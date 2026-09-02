@@ -65,8 +65,8 @@ class cqdm:
         if self.tqdm is not None:
             try:
                 self.tqdm.close()
-            except Exception:
-                pass
+            except Exception as e:
+                print(f"[llama-cpp_vlm] Warning closing tqdm: {e}")
             self.tqdm = None
 
     def __enter__(self) -> "cqdm":

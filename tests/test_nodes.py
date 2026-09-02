@@ -318,7 +318,7 @@ class TestComfyUILlamaCppVLM(unittest.TestCase):
             nodes.LLAMA_CPP_STORAGE.current_config = {"n_ctx": 4096}
 
             dummy_img = torch.zeros(1, 64, 64, 3)
-            res = inst.process(
+            _ = inst.process(
                 llama_model={"n_ctx": 4096},
                 preset_prompt="Normal - Describe",
                 custom_prompt="test",
@@ -368,7 +368,7 @@ class TestComfyUILlamaCppVLM(unittest.TestCase):
             nodes.LLAMA_CPP_STORAGE.current_config = {"n_ctx": 4096}
 
             dummy_img = torch.zeros(1, 64, 64, 3)
-            res = inst.process(
+            _ = inst.process(
                 llama_model={"n_ctx": 4096},
                 preset_prompt="Normal - Describe",
                 custom_prompt="test",

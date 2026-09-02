@@ -21,7 +21,6 @@ except ImportError:
 
 import folder_paths
 import comfy.model_management as mm
-import comfy.utils
 
 from llama_cpp import Llama
 from llama_cpp.llama_chat_format import (
@@ -198,14 +197,14 @@ class LLAMA_CPP_STORAGE:
         if cls.llm is not None:
             try:
                 cls.llm.close()
-            except Exception:
-                pass
+            except Exception as e:
+                print(f"[llama-cpp_vlm] Warning closing llm: {e}")
 
         if cls.chat_handler is not None and hasattr(cls.chat_handler, "_exit_stack"):
             try:
                 cls.chat_handler._exit_stack.close()
-            except Exception:
-                pass
+            except Exception as e:
+                print(f"[llama-cpp_vlm] Warning closing chat_handler: {e}")
 
         cls.llm = None
         cls.chat_handler = None
@@ -852,6 +851,7 @@ class llama_cpp_instruct_adv:
                     print(f"[llama-cpp_vlm] Loading state and history id={uid}...")
                     messages = LLAMA_CPP_STORAGE.messages.get(f"{uid}", [])
                 except Exception as e:
+                    print(f"[llama-cpp_vlm] Failed to load history: {e}")
                     messages = []
             else:
                 messages = []
@@ -1047,8 +1047,8 @@ class llama_cpp_instruct_adv:
             if bypass_spec and spec_engine is not None:
                 try:
                     spec_engine.clear()
-                except Exception:
-                    pass
+                except Exception as e:
+                    print(f"[llama-cpp_vlm] Warning clearing spec_engine: {e}")
                 LLAMA_CPP_STORAGE.llm.speculative = spec_engine
 
         out1 = strip_think_block(out1)
@@ -1076,13 +1076,13 @@ class llama_cpp_instruct_adv:
                     if hasattr(LLAMA_CPP_STORAGE.llm, "_ctx") and hasattr(LLAMA_CPP_STORAGE.llm._ctx, "memory_clear"):
                         try:
                             LLAMA_CPP_STORAGE.llm._ctx.memory_clear(True)
-                        except Exception:
-                            pass
+                        except Exception as e:
+                            print(f"[llama-cpp_vlm] Warning clearing memory: {e}")
                     if getattr(LLAMA_CPP_STORAGE.llm, "is_hybrid", False) and getattr(LLAMA_CPP_STORAGE.llm, "_hybrid_cache_mgr", None) is not None:
                         try:
                             LLAMA_CPP_STORAGE.llm._hybrid_cache_mgr.clear()
-                        except Exception:
-                            pass
+                        except Exception as e:
+                            print(f"[llama-cpp_vlm] Warning clearing hybrid cache: {e}")
             
         del messages
         gc.collect()
