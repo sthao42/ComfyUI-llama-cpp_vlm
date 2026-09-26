@@ -73,10 +73,12 @@ python -m pip install -r ComfyUI-llama-cpp_vlm/requirements.txt
 
 ### `llama_cpp_instruct_adv` (Llama-cpp Instruct (Advanced))
 * **`image_0`..`image_8`**: Connect reference images.
-* **`video_0`**: Connect input video batches for temporal understanding.
+* **`video_0`**: Connect input video frame batches (`IMAGE` tensor) for temporal video understanding.
+* **`video_path`**: (Optional) Direct path to a local video file (e.g. `.mp4`, `.mkv`, `.webm`) or video URL for native MTMD direct evaluation.
 * **`custom_prompt`**: Input prompt text. Supports `<Picture 0>`, `<image_0>` tags for inline placement.
 * **`preset_prompt`**: Built-in prompts for captioning, tagging, or multi-image comparison.
 * **`max_size`**: Maximum image resolution dimension (default: `4096`).
+* **`max_frames`**: Number of frames to sample evenly across input video batches.
 
 ### `PromptEnhancerPreset` (Prompt Enhancer Preset)
 * Connect to your prompt input to automatically inject curated system prompts (`Krea 2 T2I`, `Flux.2 T2I`, `Flux.2 I2I`, `Z-Image Turbo`, `Qwen-Image`, etc.).

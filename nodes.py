@@ -343,6 +343,11 @@ class LLAMA_CPP_STORAGE:
                 kwargs["image_max_tokens"] = image_max_tokens
                 kwargs["image_min_tokens"] = image_min_tokens
 
+            if "video_ffmpeg_bin_dir" in handler_params:
+                ffmpeg_env = os.environ.get("LLAMA_CPP_FFMPEG_DIR") or os.environ.get("FFMPEG_BIN_DIR")
+                if ffmpeg_env and os.path.isdir(ffmpeg_env):
+                    kwargs["video_ffmpeg_bin_dir"] = ffmpeg_env
+
             try:
                 cls.chat_handler = handler(**kwargs)
             except Exception as e:
@@ -541,6 +546,43 @@ def scale_image(image: torch.Tensor, max_size: int = 128):
     img_resized = img_pil.resize((new_w, new_h), Image.Resampling.LANCZOS)
     
     return np.array(img_resized)
+
+def get_valid_video_source(video_path: str) -> str:
+    """Validate and return normalized video path or URL, or empty string if invalid."""
+    if not video_path or not isinstance(video_path, str):
+        return ""
+    v_clean = video_path.strip().strip('"').strip("'")
+    if not v_clean:
+        return ""
+    # Support URLs or data URIs directly
+    if v_clean.startswith(("http://", "https://", "data:video/")):
+        return v_clean
+    
+    # Check if absolute or relative file exists on disk
+    if os.path.isfile(v_clean):
+        return os.path.abspath(v_clean)
+        
+    # Check inside ComfyUI input directory if available
+    try:
+        if hasattr(folder_paths, "get_input_directory"):
+            input_dir = folder_paths.get_input_directory()
+            candidate = os.path.join(input_dir, v_clean)
+            if os.path.isfile(candidate):
+                return os.path.abspath(candidate)
+    except Exception:
+        pass
+
+    # Check inside ComfyUI output directory if available
+    try:
+        if hasattr(folder_paths, "get_output_directory"):
+            output_dir = folder_paths.get_output_directory()
+            candidate = os.path.join(output_dir, v_clean)
+            if os.path.isfile(candidate):
+                return os.path.abspath(candidate)
+    except Exception:
+        pass
+
+    return ""
 
 def qwen3bbox(image, json):
     if hasattr(image, "ndim") and image.ndim == 4:
@@ -798,6 +840,11 @@ class llama_cpp_instruct_adv:
                 "image_7": ("IMAGE",),
                 "image_8": ("IMAGE",),
                 "video_0": ("IMAGE",),
+                "video_path": ("STRING", {
+                    "default": "",
+                    "multiline": False,
+                    "tooltip": "Optional direct path to a local video file (e.g. .mp4, .mkv, .webm) or video URL. If provided and valid, the model processes the video directly via MTMD/ffmpeg."
+                }),
                 "queue_handler": (any_type, {"tooltip": "Used to control the execution order of instruct nodes."}),
             },
             
@@ -813,6 +860,9 @@ class llama_cpp_instruct_adv:
     def IS_CHANGED(cls, llama_model, preset_prompt, custom_prompt, system_prompt, inference_mode, max_frames, max_size, seed, force_offload, save_states, unique_id, parameters=None, queue_handler=None, **kwargs):
         if seed is None or seed == -1:
             return float("nan")
+        video_path = kwargs.get("video_path", "")
+        if video_path:
+            return f"{seed}_{save_states}_{video_path}"
         return f"{seed}_{save_states}"
 
     def sanitize_seed(self, seed, offset=0):
@@ -832,13 +882,29 @@ class llama_cpp_instruct_adv:
             if isinstance(content, list):
                 new_content = []
                 for item in content:
-                    if isinstance(item, dict) and item.get("type") == "image_url":
-                        new_content.append({
-                            "type": "image_url",
-                            "image_url": {"url": "data:image/png;base64,iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAIAAACQd1PeAAAACXBIWXMAAAsTAAALEwEAmpwYAAAADElEQVQImWP4//8/AAX+Av5Y8msOAAAAAElFTkSuQmCC"}
-                        })
-                    elif isinstance(item, dict):
-                        new_content.append(item.copy())
+                    if isinstance(item, dict):
+                        item_type = item.get("type", "")
+                        if item_type in ("image_url", "image") or "image_url" in item or "image" in item:
+                            new_content.append({
+                                "type": "image_url",
+                                "image_url": {"url": "data:image/png;base64,iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAIAAACQd1PeAAAACXBIWXMAAAsTAAALEwEAmpwYAAAADElEQVQImWP4//8/AAX+Av5Y8msOAAAAAElFTkSuQmCC"}
+                            })
+                        elif item_type in ("video", "video_url") or "video" in item or "video_url" in item:
+                            raw_val = item.get("video") if "video" in item else item.get("video_url")
+                            if isinstance(raw_val, dict) and "url" in raw_val:
+                                raw_url = raw_val["url"]
+                            elif isinstance(raw_val, str):
+                                raw_url = raw_val
+                            else:
+                                raw_url = ""
+
+                            cleaned_url = "data:video/mp4;base64,AAAA" if raw_url.startswith("data:video/") else raw_url
+                            if item_type == "video_url" or "video_url" in item:
+                                new_content.append({"type": "video_url", "video_url": {"url": cleaned_url}})
+                            else:
+                                new_content.append({"type": "video", "video": cleaned_url})
+                        else:
+                            new_content.append(item.copy())
                     else:
                         new_content.append(item)
                 msg_copy["content"] = new_content
@@ -870,7 +936,7 @@ class llama_cpp_instruct_adv:
             if mm.processing_interrupted():
                 raise mm.InterruptProcessingException()
     
-    def process(self, llama_model, preset_prompt, custom_prompt, system_prompt, inference_mode, max_frames, max_size, seed, force_offload, save_states, unique_id, parameters=None, queue_handler=None, **kwargs):
+    def process(self, llama_model, preset_prompt, custom_prompt, system_prompt, inference_mode, max_frames, max_size, seed, force_offload, save_states, unique_id, parameters=None, queue_handler=None, video_path="", **kwargs):
         base_seed = seed
         active_seed = self.sanitize_seed(base_seed)
 
@@ -891,9 +957,12 @@ class llama_cpp_instruct_adv:
             
         uid = unique_id.rpartition('.')[-1] if _uid in (None, -1) else _uid
         
+        video_path_arg = video_path or kwargs.get("video_path", "")
+        valid_video_source = get_valid_video_source(video_path_arg)
+        video_input = (inference_mode == "video") or bool(valid_video_source)
+
         last_sys_prompt = LLAMA_CPP_STORAGE.sys_prompts.get(f"{uid}", None)
-        video_input = inference_mode == "video"
-        system_prompts = "请将输入的图片序列当做视频而不是静态帧序列, " + system_prompt if video_input else system_prompt
+        system_prompts = ("请将输入的视频当做视频进行理解, " if valid_video_source else "请将输入的图片序列当做视频而不是静态帧序列, ") + system_prompt if video_input else system_prompt
         if last_sys_prompt != system_prompts:
             messages = []
             LLAMA_CPP_STORAGE.clean_state(state_id=uid)
@@ -929,9 +998,13 @@ class llama_cpp_instruct_adv:
         final_params = {k: v for k, v in _parameters.items() if k in completion_params}
 
         # Check if the dialogue involves multimodal media (images/videos)
-        has_media = len(all_images) > 0 or any(
+        has_media = len(all_images) > 0 or bool(valid_video_source) or any(
             isinstance(msg.get("content"), list) and any(
-                isinstance(item, dict) and item.get("type") in ("image_url", "image", "video_url", "video")
+                isinstance(item, dict) and (
+                    item.get("type") in ("image_url", "image", "video_url", "video")
+                    or "image" in item or "image_url" in item
+                    or "video" in item or "video_url" in item
+                )
                 for item in msg.get("content", [])
             )
             for msg in messages
@@ -948,7 +1021,40 @@ class llama_cpp_instruct_adv:
             LLAMA_CPP_STORAGE.llm.speculative = None
 
         try:
-            if len(all_images) > 0:
+            if valid_video_source:
+                h = LLAMA_CPP_STORAGE.chat_handler
+                h_path = getattr(h, "mmproj_path", getattr(h, "clip_model_path", None)) if h is not None else None
+                if h_path is None:
+                    raise ValueError("Direct video input detected, but the loaded model is not configured with a mmproj module.")
+
+                print(f"[llama-cpp_vlm] Processing direct video source: {valid_video_source}")
+                user_content.append({"type": "text", "text": prompt_text})
+                user_content.append({"type": "video", "video": valid_video_source})
+                messages.append({"role": "user", "content": user_content})
+                try:
+                    output = self.run_chat_completion_with_abort(messages=messages, seed=active_seed, **final_params)
+                except Exception as e:
+                    if isinstance(e, mm.InterruptProcessingException):
+                        raise e
+                    err_str = str(e)
+                    if "context limit" in err_str.lower() or "eval_chunk_single" in err_str.lower() or "failed to find a memory slot" in err_str.lower() or "error code 1" in err_str.lower():
+                        raise RuntimeError(
+                            f"Multimodal Context Limit Exceeded ({e}).\n\n"
+                            f"Your prompt and video generated more tokens than n_ctx={LLAMA_CPP_STORAGE.current_config.get('n_ctx', 8192)}.\n"
+                            f"👉 Solution: Please increase 'n_ctx' in the Llama-cpp Model Loader node."
+                        ) from e
+                    if "ffmpeg" in err_str.lower():
+                        raise RuntimeError(
+                            f"Direct Video Decoding Error ({e}).\n\n"
+                            "Direct video processing requires 'ffmpeg' and 'ffprobe' installed and available on system PATH.\n"
+                            "Alternatively, load the video frames with a ComfyUI video loader node (e.g. VHS Load Video) and connect to video_0."
+                        ) from e
+                    raise e
+                content = output['choices'][0]['message'].get('content', '') or ''
+                out1 = content.removeprefix(": ").lstrip()
+                out2 = [out1]
+
+            elif len(all_images) > 0:
                 h = LLAMA_CPP_STORAGE.chat_handler
                 h_path = getattr(h, "mmproj_path", getattr(h, "clip_model_path", None)) if h is not None else None
                 if h_path is None:

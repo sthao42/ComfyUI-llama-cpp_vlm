@@ -493,6 +493,90 @@ class TestComfyUILlamaCppVLM(unittest.TestCase):
         # Draft engine without supports_predecoded_media should be bypassed
         self.assertFalse(getattr(draft, "supports_predecoded_media", False))
 
+    def test_video_path_input_registered(self):
+        """Verify video_path optional input is registered in llama_cpp_instruct_adv."""
+        optional_inputs = nodes.llama_cpp_instruct_adv.INPUT_TYPES()["optional"]
+        self.assertIn("video_path", optional_inputs)
+        self.assertEqual(optional_inputs["video_path"][0], "STRING")
+
+    def test_get_valid_video_source(self):
+        """Verify get_valid_video_source validates paths and URLs correctly."""
+        # URLs and data URIs
+        self.assertEqual(nodes.get_valid_video_source("https://example.com/test.mp4"), "https://example.com/test.mp4")
+        self.assertEqual(nodes.get_valid_video_source("http://example.com/test.webm"), "http://example.com/test.webm")
+        self.assertEqual(nodes.get_valid_video_source("data:video/mp4;base64,AAAA"), "data:video/mp4;base64,AAAA")
+        # Empty or non-existent file
+        self.assertEqual(nodes.get_valid_video_source(""), "")
+        self.assertEqual(nodes.get_valid_video_source("non_existent_file_xyz_123.mp4"), "")
+        # Real file on disk
+        self.assertTrue(len(nodes.get_valid_video_source(__file__)) > 0)
+
+    def test_sanitize_messages_video(self):
+        """Verify sanitize_messages handles video and video_url payloads correctly."""
+        inst = nodes.llama_cpp_instruct_adv()
+        messages = [
+            {
+                "role": "user",
+                "content": [
+                    {"type": "text", "text": "Describe this video"},
+                    {"type": "video", "video": "C:/videos/sample.mp4"},
+                    {"type": "video", "video": "data:video/mp4;base64,SUPERLONGDATASTRING"},
+                    {"type": "video_url", "video_url": {"url": "data:video/mp4;base64,ANOTHERLONGB64"}}
+                ]
+            }
+        ]
+        cleaned = inst.sanitize_messages(messages)
+        content = cleaned[0]["content"]
+        self.assertEqual(content[0]["text"], "Describe this video")
+        self.assertEqual(content[1]["video"], "C:/videos/sample.mp4")
+        self.assertEqual(content[2]["video"], "data:video/mp4;base64,AAAA")
+        self.assertEqual(content[3]["video_url"]["url"], "data:video/mp4;base64,AAAA")
+
+    def test_direct_video_inference(self):
+        """Verify direct video input creates chat completion with video payload."""
+        inst = nodes.llama_cpp_instruct_adv()
+        captured_messages = []
+        class MockVideoLLM:
+            def create_chat_completion(self, messages=None, **kwargs):
+                captured_messages.extend(messages)
+                return {"choices": [{"message": {"content": "Video analysis complete"}}]}
+
+        mock_llm = MockVideoLLM()
+        orig_llm = nodes.LLAMA_CPP_STORAGE.llm
+        orig_handler = nodes.LLAMA_CPP_STORAGE.chat_handler
+        orig_config = nodes.LLAMA_CPP_STORAGE.current_config
+        try:
+            nodes.LLAMA_CPP_STORAGE.llm = mock_llm
+            class DummyChatHandler:
+                mmproj_path = "fake_mmproj.gguf"
+            nodes.LLAMA_CPP_STORAGE.chat_handler = DummyChatHandler()
+            nodes.LLAMA_CPP_STORAGE.current_config = {"n_ctx": 4096}
+
+            out1, out2, uid = inst.process(
+                llama_model={"n_ctx": 4096},
+                preset_prompt="Normal - Describe",
+                custom_prompt="What happens in this clip?",
+                system_prompt="",
+                inference_mode="video",
+                max_frames=16,
+                max_size=512,
+                seed=42,
+                force_offload=False,
+                save_states=False,
+                unique_id="vid_test_1",
+                video_path="https://example.com/test_video.mp4"
+            )
+            self.assertEqual(out1, "Video analysis complete")
+            user_msg = [m for m in captured_messages if m.get("role") == "user"][-1]
+            content = user_msg["content"]
+            video_parts = [p for p in content if isinstance(p, dict) and p.get("type") == "video"]
+            self.assertEqual(len(video_parts), 1)
+            self.assertEqual(video_parts[0]["video"], "https://example.com/test_video.mp4")
+        finally:
+            nodes.LLAMA_CPP_STORAGE.llm = orig_llm
+            nodes.LLAMA_CPP_STORAGE.chat_handler = orig_handler
+            nodes.LLAMA_CPP_STORAGE.current_config = orig_config
+
 if __name__ == '__main__':
     unittest.main()
 
