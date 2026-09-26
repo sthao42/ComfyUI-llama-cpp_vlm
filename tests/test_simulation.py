@@ -56,7 +56,7 @@ if "llama_cpp" not in sys.modules:
         "GLM46VChatHandler", "LFM2VLChatHandler", "GLM41VChatHandler",
         "LFM25VLChatHandler", "GraniteDoclingChatHandler", "MiniCPMv45ChatHandler",
         "MiniCPMv46ChatHandler", "PaddleOCRChatHandler", "Qwen3ASRChatHandler", "Step3VLChatHandler",
-        "GenericMTMDChatHandler"
+        "GenericMTMDChatHandler", "ObsidianChatHandler"
     ]:
         setattr(chat_fmt, h_name, DummyHandler)
     llama_cpp.llama_chat_format = chat_fmt

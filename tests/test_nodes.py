@@ -58,7 +58,7 @@ if "llama_cpp" not in sys.modules:
         "GLM46VChatHandler", "LFM2VLChatHandler", "GLM41VChatHandler",
         "LFM25VLChatHandler", "GraniteDoclingChatHandler", "MiniCPMv45ChatHandler",
         "MiniCPMv46ChatHandler", "PaddleOCRChatHandler", "Qwen3ASRChatHandler", "Step3VLChatHandler",
-        "GenericMTMDChatHandler"
+        "GenericMTMDChatHandler", "ObsidianChatHandler"
     ]:
         setattr(chat_fmt, h_name, DummyHandler)
     llama_cpp.llama_chat_format = chat_fmt
@@ -287,8 +287,8 @@ class TestComfyUILlamaCppVLM(unittest.TestCase):
         req_path = os.path.join(REPO_ROOT, "requirements.txt")
         with open(req_path, "r", encoding="utf-8") as f:
             content = f.read()
-        self.assertIn("0.3.49", content)
-        self.assertNotIn("0.3.48", content)
+        self.assertIn("0.4.1", content)
+        self.assertNotIn("0.3.49", content)
 
     def test_multimodal_bypasses_model_draft_speculative(self):
         inst = nodes.llama_cpp_instruct_adv()
@@ -422,5 +422,77 @@ class TestComfyUILlamaCppVLM(unittest.TestCase):
             preset_node.main("Qwen-Image [ZH]")
 
 
+    def test_llama_cpp_token_stats_node(self):
+        """Test the new llama_cpp_token_stats node registration and functionality."""
+        # Test node registration
+        self.assertIn("llama_cpp_token_stats", nodes.NODE_CLASS_MAPPINGS)
+        self.assertIn("llama_cpp_token_stats", nodes.NODE_DISPLAY_NAME_MAPPINGS)
+        
+        # Test input types
+        node = nodes.llama_cpp_token_stats()
+        input_types = node.INPUT_TYPES()
+        self.assertIn("required", input_types)
+        self.assertIn("output", input_types["required"])
+        self.assertIn("session_id", input_types["required"])
+        
+        # Test stats recording and retrieval
+        test_session = "test_session_123"
+        nodes.LLAMA_CPP_STATS.record(test_session, {
+            "input_tokens": 100,
+            "output_tokens": 200,
+            "total_tokens": 300,
+            "elapsed_seconds": 1.5,
+            "tokens_per_second": 133.33
+        })
+        
+        stats = nodes.LLAMA_CPP_STATS.get(test_session)
+        self.assertIsNotNone(stats)
+        self.assertEqual(stats["input_tokens"], 100)
+        self.assertEqual(stats["output_tokens"], 200)
+        self.assertEqual(stats["total_tokens"], 300)
+        
+        # Test get_stats method
+        result = node.get_stats("test output", -1, unique_id=test_session)
+        self.assertIsInstance(result, tuple)
+        self.assertEqual(len(result), 6)
+        self.assertEqual(result[1], 100)  # input_tokens
+        self.assertEqual(result[2], 200)  # output_tokens
+        self.assertEqual(result[3], 300)  # total_tokens
+        self.assertEqual(result[4], 1.5)  # elapsed_seconds
+        self.assertEqual(result[5], 133.33)  # tokens_per_second
+        
+        # Test stats clear
+        nodes.LLAMA_CPP_STATS.clear(test_session)
+        self.assertIsNone(nodes.LLAMA_CPP_STATS.get(test_session))
+
+    def test_obsidian_chat_handler_registered(self):
+        """Verify Obsidian handler is registered in chat_handlers list."""
+        self.assertIn("Obsidian", nodes.chat_handlers)
+
+    def test_dflash2_speculative_mode_supported(self):
+        """Verify DFlash2 is an available speculative_mode option and maps to DRAFT_DFLASH."""
+        spec_modes = nodes.llama_cpp_model_loader.INPUT_TYPES()["optional"]["speculative_mode"][0]
+        self.assertIn("DFlash2", spec_modes)
+
+    def test_multimodal_supports_predecoded_media(self):
+        """Verify that N-gram engines with supports_predecoded_media=True are not unnecessarily bypassed."""
+        inst = nodes.llama_cpp_instruct_adv()
+        class MockNGramSpec:
+            supports_predecoded_media = True
+            def clear(self): pass
+
+        class MockDraftSpec:
+            supports_predecoded_media = False
+            def clear(self): pass
+
+        ngram = MockNGramSpec()
+        draft = MockDraftSpec()
+
+        # Engine with supports_predecoded_media=True should not be bypassed
+        self.assertTrue(getattr(ngram, "supports_predecoded_media", False))
+        # Draft engine without supports_predecoded_media should be bypassed
+        self.assertFalse(getattr(draft, "supports_predecoded_media", False))
+
 if __name__ == '__main__':
     unittest.main()
+

@@ -3,9 +3,11 @@ import io
 import gc
 import re
 import json
+import time
 import base64
 import random
 import inspect
+import threading
 import torch
 
 import numpy as np
@@ -171,6 +173,12 @@ try:
 except Exception:
     GenericMTMDChatHandler = None
 
+try:
+    from llama_cpp.llama_chat_format import ObsidianChatHandler
+    chat_handlers += ["Obsidian"]
+except Exception:
+    ObsidianChatHandler = None
+
 class AnyType(str):
     def __ne__(self, __value: object) -> bool:
         return False
@@ -265,6 +273,8 @@ class LLAMA_CPP_STORAGE:
                     return Step3VLChatHandler
                 case "Generic-MTMD":
                     return GenericMTMDChatHandler
+                case "Obsidian":
+                    return ObsidianChatHandler
                 case "None":
                     return None
                 case _:
@@ -395,7 +405,7 @@ class LLAMA_CPP_STORAGE:
                 from llama_cpp.llama_speculative import SpecConfig, SpeculativeType
                 resolved_type = None
 
-                if speculative_mode == "DFlash":
+                if speculative_mode in ("DFlash", "DFlash2"):
                     resolved_type = getattr(SpeculativeType, "DRAFT_DFLASH", None)
                 elif speculative_mode == "DSpark":
                     resolved_type = getattr(SpeculativeType, "DRAFT_DSPARK", None)
@@ -447,6 +457,25 @@ class LLAMA_CPP_STORAGE:
                     print(f"[llama-cpp_vlm] Warning: Speculative decoding failed to initialize: {e} / {e2}")
 
         cls.llm = Llama(**llama_kwargs)
+
+class LLAMA_CPP_STATS:
+    """Storage for per-request token usage and timing statistics."""
+    stats = {}
+    
+    @classmethod
+    def record(cls, session_id, stats_data):
+        cls.stats[session_id] = stats_data
+    
+    @classmethod
+    def get(cls, session_id):
+        return cls.stats.get(session_id)
+    
+    @classmethod
+    def clear(cls, session_id=None):
+        if session_id is None:
+            cls.stats.clear()
+        else:
+            cls.stats.pop(session_id, None)
 
 any_type = AnyType("*")
 
@@ -677,9 +706,9 @@ class llama_cpp_model_loader:
             }),
             },
             "optional": {
-                "speculative_mode": (["auto", "NGRAM", "DFlash", "DSpark", "MTP"], {
+                "speculative_mode": (["auto", "NGRAM", "DFlash", "DFlash2", "DSpark", "MTP"], {
                     "default": "auto",
-                    "tooltip": "Speculative decoding mode. 'auto' selects DFlash/MTP if draft_model is provided, or NGRAM if enable_mtp is True."
+                    "tooltip": "Speculative decoding mode. 'auto' selects DFlash/DFlash2/DSpark/MTP if draft_model is provided, or NGRAM if enable_mtp is True."
                 }),
                 "draft_model": (draft_model_list, {
                     "default": "None",
@@ -817,10 +846,36 @@ class llama_cpp_instruct_adv:
                 msg_copy["content"] = content
             clean_messages.append(msg_copy)
         return clean_messages
+
+    def run_chat_completion_with_abort(self, messages, seed, **final_params):
+        """Execute chat completion with real-time ComfyUI interruption monitoring and native Llama.abort()."""
+        stop_monitor = threading.Event()
+        def _abort_watchdog():
+            while not stop_monitor.wait(0.1):
+                if mm.processing_interrupted():
+                    try:
+                        if LLAMA_CPP_STORAGE.llm is not None and hasattr(LLAMA_CPP_STORAGE.llm, "abort"):
+                            LLAMA_CPP_STORAGE.llm.abort()
+                    except Exception:
+                        pass
+                    break
+
+        watchdog = threading.Thread(target=_abort_watchdog, daemon=True)
+        watchdog.start()
+        try:
+            return LLAMA_CPP_STORAGE.llm.create_chat_completion(messages=messages, seed=seed, **final_params)
+        finally:
+            stop_monitor.set()
+            watchdog.join(timeout=0.5)
+            if mm.processing_interrupted():
+                raise mm.InterruptProcessingException()
     
     def process(self, llama_model, preset_prompt, custom_prompt, system_prompt, inference_mode, max_frames, max_size, seed, force_offload, save_states, unique_id, parameters=None, queue_handler=None, **kwargs):
         base_seed = seed
         active_seed = self.sanitize_seed(base_seed)
+
+        # Start timing for token statistics
+        start_time = time.monotonic()
 
         if not LLAMA_CPP_STORAGE.llm:
             LLAMA_CPP_STORAGE.load_model(llama_model)
@@ -882,16 +937,14 @@ class llama_cpp_instruct_adv:
             for msg in messages
         )
 
-        # Speculative Decoding engines (both model-backed like DFlash/DSpark/MTP and N-gram like NGRAM_MAP_K)
-        # in llama.cpp / llama-cpp-python are strictly text-only.
-        # In multimodal requests, MTMD evaluates visual tokens as negative reverse-vocabulary token IDs (e.g. -9083822).
-        # When speculative decoding is active, llama.generate() attempts to re-evaluate prompt_prefix through llama.eval(),
-        # which clears the multimodal KV cache and triggers ValueError: invalid negative token id or llama_decode failures.
-        # We automatically bypass the speculative engine during multimodal requests and cleanly restore it afterwards.
+        # Speculative Decoding: In llama-cpp-python 0.4.0+, N-gram speculation (NGRAM_MAP_K/K4V)
+        # declares supports_predecoded_media=True and can safely accelerate multimodal generation.
+        # Draft-model sidecars (DFlash / DSpark / MTP) remain text-only (supports_predecoded_media=False)
+        # and must be bypassed during multimodal evaluation to avoid KV cache invalidation.
         spec_engine = getattr(LLAMA_CPP_STORAGE.llm, "speculative", None)
-        bypass_spec = has_media and spec_engine is not None
+        bypass_spec = has_media and spec_engine is not None and not getattr(spec_engine, "supports_predecoded_media", False)
         if bypass_spec:
-            print("[llama-cpp_vlm] Multimodal input detected: llama.cpp speculative decoding (NGRAM / DFlash / DSpark / MTP) is text-only; automatically bypassing speculation for this multimodal request.")
+            print("[llama-cpp_vlm] Multimodal input detected: draft-model speculative decoding (DFlash / DSpark / MTP) is text-only; automatically bypassing speculation for this multimodal request.")
             LLAMA_CPP_STORAGE.llm.speculative = None
 
         try:
@@ -932,8 +985,10 @@ class llama_cpp_instruct_adv:
                         frame_messages = messages + [{"role": "user", "content": frame_user_content}]
                         frame_seed = self.sanitize_seed(base_seed, offset=i)
                         try:
-                            output = LLAMA_CPP_STORAGE.llm.create_chat_completion(messages=frame_messages, seed=frame_seed, **final_params)
+                            output = self.run_chat_completion_with_abort(messages=frame_messages, seed=frame_seed, **final_params)
                         except Exception as e:
+                            if isinstance(e, mm.InterruptProcessingException):
+                                raise e
                             err_str = str(e)
                             if "context limit" in err_str.lower() or "eval_chunk_single" in err_str.lower() or "failed to find a memory slot" in err_str.lower() or "error code 1" in err_str.lower():
                                 raise RuntimeError(
@@ -996,13 +1051,16 @@ class llama_cpp_instruct_adv:
                         for idx, b64_url in enumerate(base64_frames):
                             if len(base64_frames) > 1:
                                 tag_num = idx if has_zero else idx + 1
-                                user_content.append({"type": "text", "text": f"\n<Picture {tag_num}>:\n"})
+                                tag_prefix = "Frame" if video_input else "Picture"
+                                user_content.append({"type": "text", "text": f"\n<{tag_prefix} {tag_num}>:\n"})
                             user_content.append({"type": "image_url", "image_url": {"url": b64_url}})
 
                     messages.append({"role": "user", "content": user_content})
                     try:
-                        output = LLAMA_CPP_STORAGE.llm.create_chat_completion(messages=messages, seed=active_seed, **final_params)
+                        output = self.run_chat_completion_with_abort(messages=messages, seed=active_seed, **final_params)
                     except Exception as e:
+                        if isinstance(e, mm.InterruptProcessingException):
+                            raise e
                         err_str = str(e)
                         if "context limit" in err_str.lower() or "eval_chunk_single" in err_str.lower() or "failed to find a memory slot" in err_str.lower() or "error code 1" in err_str.lower():
                             raise RuntimeError(
@@ -1024,8 +1082,10 @@ class llama_cpp_instruct_adv:
                 user_content.append({"type": "text", "text": prompt_text})
                 messages.append({"role": "user", "content": user_content})
                 try:
-                    output = LLAMA_CPP_STORAGE.llm.create_chat_completion(messages=messages, seed=active_seed, **final_params)
+                    output = self.run_chat_completion_with_abort(messages=messages, seed=active_seed, **final_params)
                 except Exception as e:
+                    if isinstance(e, mm.InterruptProcessingException):
+                        raise e
                     err_str = str(e)
                     if "context limit" in err_str.lower() or "eval_chunk_single" in err_str.lower() or "failed to find a memory slot" in err_str.lower() or "error code 1" in err_str.lower():
                         raise RuntimeError(
@@ -1050,6 +1110,34 @@ class llama_cpp_instruct_adv:
                 except Exception as e:
                     print(f"[llama-cpp_vlm] Warning clearing spec_engine: {e}")
                 LLAMA_CPP_STORAGE.llm.speculative = spec_engine
+
+        # Calculate elapsed time and token statistics
+        elapsed_seconds = time.monotonic() - start_time
+        
+        # Extract token usage from last response (stored in output variable)
+        input_tokens = 0
+        output_tokens = 0
+        total_tokens = 0
+        try:
+            if 'output' in locals() and isinstance(output, dict):
+                usage = output.get('usage', {})
+                input_tokens = usage.get('prompt_tokens', 0)
+                output_tokens = usage.get('completion_tokens', 0)
+                total_tokens = usage.get('total_tokens', 0)
+        except Exception as e:
+            print(f"[llama-cpp_vlm] Warning extracting token usage: {e}")
+        
+        # Calculate tokens per second
+        tps = output_tokens / elapsed_seconds if elapsed_seconds > 0 and output_tokens > 0 else 0
+        
+        # Store stats
+        LLAMA_CPP_STATS.record(uid, {
+            "input_tokens": input_tokens,
+            "output_tokens": output_tokens,
+            "total_tokens": total_tokens,
+            "elapsed_seconds": elapsed_seconds,
+            "tokens_per_second": tps
+        })
 
         out1 = strip_think_block(out1)
             
@@ -1610,12 +1698,50 @@ class PromptEnhancerPreset:
             return (PRESET_LOOKUP[preset],)
         raise ValueError(f'Unknown preset: "{preset}"')
         
+class llama_cpp_token_stats:
+    @classmethod
+    def INPUT_TYPES(s):
+        return {
+            "required": {
+                "output": ("STRING", {"forceInput": True}),
+                "session_id": ("INT", {"default": -1, "min": -1, "max": 999999, "step": 1, "tooltip": "Session ID to retrieve stats for (-1 = use unique_id)"}),
+            },
+        }
+    
+    RETURN_TYPES = ("DICT", "INT", "INT", "INT", "FLOAT", "FLOAT")
+    RETURN_NAMES = ("stats", "input_tokens", "output_tokens", "total_tokens", "elapsed_seconds", "tokens_per_second")
+    FUNCTION = "get_stats"
+    CATEGORY = "llama-cpp-vlm"
+    
+    @classmethod
+    def IS_CHANGED(cls, output, session_id, unique_id, **kwargs):
+        return float("nan")
+    def get_stats(self, output, session_id, unique_id, **kwargs):
+        sid = session_id if session_id != -1 else unique_id.rpartition('.')[-1]
+        stats = LLAMA_CPP_STATS.get(sid)
+        if stats is None and isinstance(sid, str) and sid.isdigit():
+            stats = LLAMA_CPP_STATS.get(int(sid))
+        elif stats is None and isinstance(sid, int):
+            stats = LLAMA_CPP_STATS.get(str(sid))
+        if stats is None:
+            return ({}, 0, 0, 0, 0.0, 0.0)
+        
+        input_tokens = stats.get("input_tokens", 0)
+        output_tokens = stats.get("output_tokens", 0)
+        total_tokens = stats.get("total_tokens", 0)
+        elapsed_seconds = stats.get("elapsed_seconds", 0.0)
+        tokens_per_second = stats.get("tokens_per_second", 0.0)
+        
+        print(f"[llama-cpp_vlm] Token Stats (session {sid}): input={input_tokens}, output={output_tokens}, total={total_tokens}, time={elapsed_seconds:.2f}s, tps={tokens_per_second:.2f}")
+        return (stats, input_tokens, output_tokens, total_tokens, elapsed_seconds, tokens_per_second)
+
 NODE_CLASS_MAPPINGS = {
     "llama_cpp_model_loader": llama_cpp_model_loader,
     "llama_cpp_instruct_adv": llama_cpp_instruct_adv,
     "llama_cpp_parameters": llama_cpp_parameters,
     "llama_cpp_unload_model": llama_cpp_unload_model,
     "llama_cpp_clean_states": llama_cpp_clean_states,
+    "llama_cpp_token_stats": llama_cpp_token_stats,
     "parse_json_node": parse_json_node,
     "json_to_bbox": json_to_bbox,
     "bbox_to_segs": bbox_to_segs,
@@ -1631,6 +1757,7 @@ NODE_DISPLAY_NAME_MAPPINGS = {
     "llama_cpp_parameters": "Llama-cpp Parameters",
     "llama_cpp_unload_model": "Llama-cpp Unload Model",
     "llama_cpp_clean_states": "Llama-cpp Clean States",
+    "llama_cpp_token_stats": "Token Usage Stats",
     "parse_json_node": "Parse JSON",
     "json_to_bbox": "JSON to BBoxes",
     "bbox_to_segs": "BBoxes to SEGS",
