@@ -1,13 +1,120 @@
+# Byte-compiled / optimized / DLL files
 __pycache__/
-checkpoints/
 *.py[cod]
 *$py.class
-*.egg-info
-.pytest_cache
+*.so
+*.pyd
+*.dll
+
+# C extensions
+*.obj
+*.o
+*.a
+*.lib
+
+# Distribution / packaging
+build/
+dist/
+downloads/
+eggs/
+.eggs/
+lib/
+lib64/
+parts/
+sdist/
+var/
+wheels/
+*.egg-info/
+.installed.cfg
+*.egg
+
+# Testing and coverage
+.pytest_cache/
+.coverage
+.coverage.*
+htmlcov/
+.tox/
+.nox/
+.hypothesis/
+
+# Type checking & linting
+.mypy_cache/
+.ruff_cache/
+.dmypy.json
+dmypy.json
+
+# Virtual environments
+.venv/
+venv/
+ENV/
+env/
+env.bak/
+venv.bak/
+
+# ComfyUI model files, checkpoints, and runtime data directories
+models/
+checkpoints/
+loras/
+clip/
+clip_vision/
+vae/
+controlnet/
+input/
+output/
+temp/
+cache/
+*.gguf
+*.safetensors
+*.bin
+*.pth
+*.pt
+*.onnx
+*.weights
+
+# IDE & Editor files
+.vscode/
+.idea/
+*.swp
+*.swo
+*~
+.cursor/
+.ropeproject
+*.sublime-project
+*.sublime-workspace
+
+# Operating System files
 .DS_Store
+.DS_Store?
+._*
+.Spotlight-V100
+.Trashes
+ehthumbs.db
+Thumbs.db
+desktop.ini
+
+# Logs and temporary files
 *.log
 *.tmp
+*.temp
+*.bak
+*.orig
+crash_dump*
+
+# Environment and secrets
 .env*
 secrets/
+*.pem
+*.key
+*.cert
+
+# Agent & local workflow rules
 .agents/
-GEMINI.md
+GEMINI.md
+AGENTS.md
+CLAUDE.md
+.cursorrules
+
+# Scratch and ad-hoc validation files
+scratch/
+validate_*.py
+*walkthrough*.md
