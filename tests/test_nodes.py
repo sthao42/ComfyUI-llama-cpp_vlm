@@ -57,7 +57,7 @@ if "llama_cpp" not in sys.modules:
         "Qwen25VLChatHandler", "Qwen3VLChatHandler", "Qwen35ChatHandler", "Qwen38ChatHandler",
         "GLM46VChatHandler", "LFM2VLChatHandler", "GLM41VChatHandler",
         "LFM25VLChatHandler", "GraniteDoclingChatHandler", "MiniCPMv45ChatHandler",
-        "MiniCPMv46ChatHandler", "PaddleOCRChatHandler", "Qwen3ASRChatHandler", "Step3VLChatHandler",
+        "MiniCPMv46ChatHandler", "MiniCPMV46ChatHandler", "PaddleOCRChatHandler", "Qwen3ASRChatHandler", "Step3VLChatHandler",
         "GenericMTMDChatHandler", "ObsidianChatHandler"
     ]:
         setattr(chat_fmt, h_name, DummyHandler)
@@ -79,6 +79,7 @@ if "llama_cpp" not in sys.modules:
     class SpecConfig:
         def __init__(self, spec_type=SpeculativeType.NONE, **kwargs):
             self.spec_type = spec_type
+            self.draft_model_path = kwargs.get("draft_model_path", None)
             for k, v in kwargs.items():
                 setattr(self, k, v)
     class LlamaNGramMapDecoding:
@@ -264,6 +265,65 @@ class TestComfyUILlamaCppVLM(unittest.TestCase):
         self.assertIsInstance(spec, SpecConfig)
         self.assertEqual(spec.spec_type, SpeculativeType.DRAFT_DFLASH)
         self.assertTrue(hasattr(spec, "draft_model_path"))
+
+    def test_model_loader_mtp_speculative(self):
+        loader = nodes.llama_cpp_model_loader()
+        captured_kwargs = {}
+        def mock_init(self, speculative=None, **kwargs):
+            if speculative is not None:
+                captured_kwargs["speculative"] = speculative
+        orig_init = nodes.Llama.__init__
+        try:
+            nodes.Llama.__init__ = mock_init
+            # 1. Native MTP (no draft model)
+            loader.loadmodel(
+                model="target_model.gguf",
+                speculative_mode="MTP",
+                draft_model="None"
+            )
+            from llama_cpp.llama_speculative import SpecConfig, SpeculativeType
+            self.assertIn("speculative", captured_kwargs)
+            spec_native = captured_kwargs["speculative"]
+            self.assertIsInstance(spec_native, SpecConfig)
+            self.assertEqual(spec_native.spec_type, SpeculativeType.DRAFT_MTP)
+            self.assertIsNone(spec_native.draft_model_path)
+
+            # 2. External MTP sidecar
+            nodes.LLAMA_CPP_STORAGE.current_config = None
+            loader.loadmodel(
+                model="target_model.gguf",
+                speculative_mode="MTP",
+                draft_model="mtp_draft.gguf"
+            )
+            spec_draft = captured_kwargs["speculative"]
+            self.assertEqual(spec_draft.spec_type, SpeculativeType.DRAFT_MTP)
+            self.assertTrue(bool(spec_draft.draft_model_path))
+        finally:
+            nodes.Llama.__init__ = orig_init
+
+    def test_model_loader_eagle3_speculative(self):
+        loader = nodes.llama_cpp_model_loader()
+        captured_kwargs = {}
+        def mock_init(self, speculative=None, **kwargs):
+            if speculative is not None:
+                captured_kwargs["speculative"] = speculative
+        orig_init = nodes.Llama.__init__
+        try:
+            nodes.Llama.__init__ = mock_init
+            loader.loadmodel(
+                model="target_model.gguf",
+                speculative_mode="Eagle3",
+                draft_model="eagle_draft.gguf"
+            )
+            from llama_cpp.llama_speculative import SpecConfig, SpeculativeType
+            self.assertIn("speculative", captured_kwargs)
+            spec = captured_kwargs["speculative"]
+            self.assertIsInstance(spec, SpecConfig)
+            self.assertEqual(spec.spec_type, SpeculativeType.DRAFT_EAGLE3)
+            self.assertTrue(bool(spec.draft_model_path))
+        finally:
+            nodes.Llama.__init__ = orig_init
+
 
     def test_parameters_node_dry(self):
         params_node = nodes.llama_cpp_parameters()
@@ -470,10 +530,17 @@ class TestComfyUILlamaCppVLM(unittest.TestCase):
         """Verify Obsidian handler is registered in chat_handlers list."""
         self.assertIn("Obsidian", nodes.chat_handlers)
 
-    def test_dflash2_speculative_mode_supported(self):
-        """Verify DFlash2 is an available speculative_mode option and maps to DRAFT_DFLASH."""
+    def test_minicpm_v46_chat_handler_registered(self):
+        """Verify MiniCPM-v4.6 handlers are registered in chat_handlers list for 0.4.1+."""
+        self.assertIn("MiniCPM-v4.6", nodes.chat_handlers)
+        self.assertIn("MiniCPM-v4.6-Thinking", nodes.chat_handlers)
+
+    def test_speculative_modes_supported(self):
+        """Verify DFlash2, MTP, and Eagle3 are available speculative_mode options."""
         spec_modes = nodes.llama_cpp_model_loader.INPUT_TYPES()["optional"]["speculative_mode"][0]
         self.assertIn("DFlash2", spec_modes)
+        self.assertIn("MTP", spec_modes)
+        self.assertIn("Eagle3", spec_modes)
 
     def test_multimodal_supports_predecoded_media(self):
         """Verify that N-gram engines with supports_predecoded_media=True are not unnecessarily bypassed."""

@@ -144,10 +144,14 @@ except Exception:
     MiniCPMv45ChatHandler = None
 
 try:
-    from llama_cpp.llama_chat_format import MiniCPMv46ChatHandler
+    from llama_cpp.llama_chat_format import MiniCPMV46ChatHandler as MiniCPMv46ChatHandler
     chat_handlers += ["MiniCPM-v4.6", "MiniCPM-v4.6-Thinking"]
 except Exception:
-    MiniCPMv46ChatHandler = None
+    try:
+        from llama_cpp.llama_chat_format import MiniCPMv46ChatHandler
+        chat_handlers += ["MiniCPM-v4.6", "MiniCPM-v4.6-Thinking"]
+    except Exception:
+        MiniCPMv46ChatHandler = None
 
 try:
     from llama_cpp.llama_chat_format import PaddleOCRChatHandler
@@ -416,6 +420,8 @@ class LLAMA_CPP_STORAGE:
                     resolved_type = getattr(SpeculativeType, "DRAFT_DSPARK", None)
                 elif speculative_mode == "MTP":
                     resolved_type = getattr(SpeculativeType, "DRAFT_MTP", None)
+                elif speculative_mode in ("Eagle", "Eagle3"):
+                    resolved_type = getattr(SpeculativeType, "DRAFT_EAGLE3", None)
                 elif speculative_mode == "NGRAM":
                     resolved_type = getattr(SpeculativeType, "NGRAM_MAP_K", None)
                 elif speculative_mode == "auto":
@@ -425,6 +431,8 @@ class LLAMA_CPP_STORAGE:
                             resolved_type = getattr(SpeculativeType, "DRAFT_DSPARK", SpeculativeType.DRAFT_DFLASH)
                         elif "mtp" in dm_lower:
                             resolved_type = getattr(SpeculativeType, "DRAFT_MTP", SpeculativeType.DRAFT_DFLASH)
+                        elif "eagle" in dm_lower:
+                            resolved_type = getattr(SpeculativeType, "DRAFT_EAGLE3", SpeculativeType.DRAFT_DFLASH)
                         else:
                             resolved_type = getattr(SpeculativeType, "DRAFT_DFLASH", getattr(SpeculativeType, "DRAFT_MTP", SpeculativeType.NGRAM_MAP_K))
                     elif enable_mtp:
@@ -436,6 +444,7 @@ class LLAMA_CPP_STORAGE:
                         getattr(SpeculativeType, "DRAFT_DFLASH", None),
                         getattr(SpeculativeType, "DRAFT_DSPARK", None),
                         getattr(SpeculativeType, "DRAFT_MTP", None),
+                        getattr(SpeculativeType, "DRAFT_EAGLE3", None),
                         getattr(SpeculativeType, "DRAFT_SIMPLE", None),
                     }:
                         spec_kwargs["draft_model_path"] = draft_model_path
@@ -748,13 +757,13 @@ class llama_cpp_model_loader:
             }),
             },
             "optional": {
-                "speculative_mode": (["auto", "NGRAM", "DFlash", "DFlash2", "DSpark", "MTP"], {
+                "speculative_mode": (["auto", "NGRAM", "DFlash", "DFlash2", "DSpark", "MTP", "Eagle3"], {
                     "default": "auto",
-                    "tooltip": "Speculative decoding mode. 'auto' selects DFlash/DFlash2/DSpark/MTP if draft_model is provided, or NGRAM if enable_mtp is True."
+                    "tooltip": "Speculative decoding mode. 'auto' selects DFlash/DFlash2/DSpark/MTP/Eagle3 if draft_model is provided, or NGRAM if enable_mtp is True."
                 }),
                 "draft_model": (draft_model_list, {
                     "default": "None",
-                    "tooltip": "Optional draft / sidecar model for DFlash / DSpark / MTP speculative decoding (llama.cpp 0.3.49+).\nNote: Draft sidecars accelerate text generation and are automatically bypassed when processing image inputs."
+                    "tooltip": "Optional draft / sidecar model for DFlash / DSpark / MTP / Eagle3 speculative decoding (llama.cpp 0.3.49+ / 0.4.1+).\nNote: Draft sidecars accelerate text generation and are automatically bypassed when processing image inputs."
                 }),
             }
         }
