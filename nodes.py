@@ -845,7 +845,6 @@ class llama_cpp_instruct_adv:
                     "multiline": False,
                     "tooltip": "Optional direct path to a local video file (e.g. .mp4, .mkv, .webm) or video URL. If provided and valid, the model processes the video directly via MTMD/ffmpeg."
                 }),
-                "queue_handler": (any_type, {"tooltip": "Used to control the execution order of instruct nodes."}),
             },
             
         }
@@ -857,7 +856,7 @@ class llama_cpp_instruct_adv:
     CATEGORY = "llama-cpp-vlm"
     
     @classmethod
-    def IS_CHANGED(cls, llama_model, preset_prompt, custom_prompt, system_prompt, inference_mode, max_frames, max_size, seed, force_offload, save_states, unique_id, parameters=None, queue_handler=None, **kwargs):
+    def IS_CHANGED(cls, llama_model, preset_prompt, custom_prompt, system_prompt, inference_mode, max_frames, max_size, seed, force_offload, save_states, unique_id, parameters=None, **kwargs):
         if seed is None or seed == -1:
             return float("nan")
         video_path = kwargs.get("video_path", "")
@@ -936,7 +935,7 @@ class llama_cpp_instruct_adv:
             if mm.processing_interrupted():
                 raise mm.InterruptProcessingException()
     
-    def process(self, llama_model, preset_prompt, custom_prompt, system_prompt, inference_mode, max_frames, max_size, seed, force_offload, save_states, unique_id, parameters=None, queue_handler=None, video_path="", **kwargs):
+    def process(self, llama_model, preset_prompt, custom_prompt, system_prompt, inference_mode, max_frames, max_size, seed, force_offload, save_states, unique_id, parameters=None, video_path="", **kwargs):
         base_seed = seed
         active_seed = self.sanitize_seed(base_seed)
 

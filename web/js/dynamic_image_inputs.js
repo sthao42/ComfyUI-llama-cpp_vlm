@@ -45,7 +45,7 @@ function findInsertionIndex(node, prefix) {
         return lastMatchIdx + 1;
     }
 
-    const anchorIdx = inputs.findIndex(inp => inp && (inp.name === "video_0" || inp.name === "queue_handler"));
+    const anchorIdx = inputs.findIndex(inp => inp && inp.name === "video_0");
     if (anchorIdx !== -1) {
         return anchorIdx;
     }
