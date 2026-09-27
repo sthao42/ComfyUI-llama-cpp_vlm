@@ -9,7 +9,7 @@ const TARGET_CLASSES = new Set([
 const MAX_SOCKETS = 9;
 
 function isTargetNode(nodeOrData) {
-    const className = nodeOrData?.comfyClass || nodeOrData?.type || nodeOrData?.name;
+    const className = nodeOrData?.comfyClass || nodeOrData?.type || nodeOrData?.name || nodeOrData?.constructor?.comfyClass || nodeOrData?.constructor?.type;
     return TARGET_CLASSES.has(className);
 }
 
@@ -133,14 +133,34 @@ function reorderVideoPathWidget(node) {
         return;
     }
     const idx = node.widgets.findIndex(w => w && w.name === "video_path");
-    if (idx > 0) {
+    if (idx === -1) {
+        return;
+    }
+    const presetIdx = node.widgets.findIndex(w => w && w.name === "preset_prompt");
+    if (presetIdx !== -1 && idx > presetIdx) {
+        const [videoPathWidget] = node.widgets.splice(idx, 1);
+        node.widgets.splice(presetIdx, 0, videoPathWidget);
+        node.arrange?.();
+        node.setDirtyCanvas?.(true, true);
+    } else if (presetIdx === -1 && idx > 0) {
         const [videoPathWidget] = node.widgets.splice(idx, 1);
         node.widgets.unshift(videoPathWidget);
+        node.arrange?.();
+        node.setDirtyCanvas?.(true, true);
     }
 }
 
 function restoreLegacyWidgetsValues(node, values) {
     if (!Array.isArray(values) || !node.widgets) {
+        return;
+    }
+
+    const presetWidget = node.widgets.find(w => w && w.name === "preset_prompt");
+    const isLegacyValues = presetWidget?.options?.values 
+        ? presetWidget.options.values.includes(values[0])
+        : (typeof values[0] === "string" && !values[0].includes("/") && !values[0].includes("\\") && values[0].length > 0 && typeof values[4] === "number");
+
+    if (!isLegacyValues) {
         return;
     }
 
@@ -157,6 +177,31 @@ function restoreLegacyWidgetsValues(node, values) {
             "force_offload",
             "save_states",
             "video_path"
+        ];
+    } else if (values.length === 10) {
+        order = [
+            "preset_prompt",
+            "custom_prompt",
+            "system_prompt",
+            "inference_mode",
+            "max_frames",
+            "max_size",
+            "seed",
+            "control_after_generate",
+            "force_offload",
+            "save_states"
+        ];
+    } else if (values.length === 9) {
+        order = [
+            "preset_prompt",
+            "custom_prompt",
+            "system_prompt",
+            "inference_mode",
+            "max_frames",
+            "max_size",
+            "seed",
+            "force_offload",
+            "save_states"
         ];
     }
 
@@ -187,9 +232,10 @@ function syncAllDynamicInputs(node) {
             const current = node.size || [0, 0];
             node.setSize([
                 Math.max(current[0], computed[0]),
-                computed[1]
+                Math.max(current[1], computed[1])
             ]);
         }
+        node.arrange?.();
         node.setDirtyCanvas?.(true, true);
         app.graph?.setDirtyCanvas(true, true);
     } finally {
@@ -202,6 +248,41 @@ app.registerExtension({
     async beforeRegisterNodeDef(nodeType, nodeData) {
         if (!isTargetNode(nodeData)) {
             return;
+        }
+
+        // Ensure video_path is in required, directly before preset_prompt in nodeData
+        if (nodeData.input?.optional?.video_path) {
+            const videoPathSpec = nodeData.input.optional.video_path;
+            delete nodeData.input.optional.video_path;
+            if (nodeData.input.required && !nodeData.input.required.video_path) {
+                const newReq = {};
+                for (const [k, v] of Object.entries(nodeData.input.required)) {
+                    if (k === "preset_prompt") {
+                        newReq.video_path = videoPathSpec;
+                    }
+                    newReq[k] = v;
+                }
+                if (!newReq.video_path) {
+                    newReq.video_path = videoPathSpec;
+                }
+                nodeData.input.required = newReq;
+            }
+        } else if (nodeData.input?.required?.video_path && nodeData.input?.required?.preset_prompt) {
+            const keys = Object.keys(nodeData.input.required);
+            const vIdx = keys.indexOf("video_path");
+            const pIdx = keys.indexOf("preset_prompt");
+            if (vIdx > pIdx) {
+                const videoPathSpec = nodeData.input.required.video_path;
+                delete nodeData.input.required.video_path;
+                const newReq = {};
+                for (const [k, v] of Object.entries(nodeData.input.required)) {
+                    if (k === "preset_prompt") {
+                        newReq.video_path = videoPathSpec;
+                    }
+                    newReq[k] = v;
+                }
+                nodeData.input.required = newReq;
+            }
         }
 
         const onNodeCreated = nodeType.prototype.onNodeCreated;

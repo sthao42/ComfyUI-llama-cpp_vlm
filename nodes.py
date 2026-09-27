@@ -803,6 +803,11 @@ class llama_cpp_instruct_adv:
         return {
             "required": {
                 "llama_model": ("LLAMACPPMODEL",),
+                "video_path": ("STRING", {
+                    "default": "",
+                    "multiline": False,
+                    "tooltip": "Optional direct path to a local video file (e.g. .mp4, .mkv, .webm) or video URL. If provided and valid, the model processes the video directly via MTMD/ffmpeg."
+                }),
                 "preset_prompt": (preset_tags, {"default": preset_tags[1]}),
                 "custom_prompt": ("STRING", {"default": "", "multiline": True, "placeholder": 'user_prompt\n\nFor preset hints marked with an "*", this will be used to fill the placeholder (e.g., Object names in BBox detection)\nOtherwise, this will override the preset prompts.'}),
                 "system_prompt": ("STRING", {"multiline": True, "default": ""}),
@@ -849,11 +854,6 @@ class llama_cpp_instruct_adv:
                 "image_7": ("IMAGE",),
                 "image_8": ("IMAGE",),
                 "video_0": ("IMAGE",),
-                "video_path": ("STRING", {
-                    "default": "",
-                    "multiline": False,
-                    "tooltip": "Optional direct path to a local video file (e.g. .mp4, .mkv, .webm) or video URL. If provided and valid, the model processes the video directly via MTMD/ffmpeg."
-                }),
             },
             
         }
@@ -865,12 +865,12 @@ class llama_cpp_instruct_adv:
     CATEGORY = "llama-cpp-vlm"
     
     @classmethod
-    def IS_CHANGED(cls, llama_model, preset_prompt, custom_prompt, system_prompt, inference_mode, max_frames, max_size, seed, force_offload, save_states, unique_id, parameters=None, **kwargs):
+    def IS_CHANGED(cls, llama_model=None, preset_prompt="", custom_prompt="", system_prompt="", inference_mode="one by one", max_frames=24, max_size=4096, seed=0, force_offload=False, save_states=False, unique_id="", parameters=None, video_path="", **kwargs):
         if seed is None or seed == -1:
             return float("nan")
-        video_path = kwargs.get("video_path", "")
-        if video_path:
-            return f"{seed}_{save_states}_{video_path}"
+        video_path_val = video_path or kwargs.get("video_path", "")
+        if video_path_val:
+            return f"{seed}_{save_states}_{video_path_val}"
         return f"{seed}_{save_states}"
 
     def sanitize_seed(self, seed, offset=0):
@@ -945,6 +945,12 @@ class llama_cpp_instruct_adv:
                 raise mm.InterruptProcessingException()
     
     def process(self, llama_model, preset_prompt, custom_prompt, system_prompt, inference_mode, max_frames, max_size, seed, force_offload, save_states, unique_id, parameters=None, video_path="", **kwargs):
+        # Support positional calling if called positionally matching INPUT_TYPES order (llama_model, video_path, preset_prompt, ...)
+        if isinstance(preset_prompt, str) and (preset_prompt.startswith(("http://", "https://", "data:video/")) or any(preset_prompt.lower().endswith(ext) for ext in (".mp4", ".mkv", ".webm", ".avi", ".mov", ".flv"))):
+            if not video_path:
+                video_path = preset_prompt
+                preset_prompt = custom_prompt if isinstance(custom_prompt, str) and custom_prompt in preset_tags else (preset_tags[1] if preset_tags else "Normal - Describe")
+
         base_seed = seed
         active_seed = self.sanitize_seed(base_seed)
 

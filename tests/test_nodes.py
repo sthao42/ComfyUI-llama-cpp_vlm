@@ -562,10 +562,12 @@ class TestComfyUILlamaCppVLM(unittest.TestCase):
         self.assertFalse(getattr(draft, "supports_predecoded_media", False))
 
     def test_video_path_input_registered(self):
-        """Verify video_path optional input is registered in llama_cpp_instruct_adv."""
-        optional_inputs = nodes.llama_cpp_instruct_adv.INPUT_TYPES()["optional"]
-        self.assertIn("video_path", optional_inputs)
-        self.assertEqual(optional_inputs["video_path"][0], "STRING")
+        """Verify video_path input is registered in required inputs directly before preset_prompt."""
+        required_inputs = nodes.llama_cpp_instruct_adv.INPUT_TYPES()["required"]
+        self.assertIn("video_path", required_inputs)
+        self.assertEqual(required_inputs["video_path"][0], "STRING")
+        keys = list(required_inputs.keys())
+        self.assertLess(keys.index("video_path"), keys.index("preset_prompt"))
 
     def test_get_valid_video_source(self):
         """Verify get_valid_video_source validates paths and URLs correctly."""
