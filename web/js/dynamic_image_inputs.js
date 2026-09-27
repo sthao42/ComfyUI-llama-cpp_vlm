@@ -114,6 +114,63 @@ function syncDynamicCategoryInputs(node, prefix, type) {
     renumberDynamicInputs(node, prefix);
 }
 
+const LEGACY_WIDGET_ORDER = [
+    "preset_prompt",
+    "custom_prompt",
+    "system_prompt",
+    "inference_mode",
+    "max_frames",
+    "max_size",
+    "seed",
+    "control_after_generate",
+    "force_offload",
+    "save_states",
+    "video_path"
+];
+
+function reorderVideoPathWidget(node) {
+    if (!node || !node.widgets) {
+        return;
+    }
+    const idx = node.widgets.findIndex(w => w && w.name === "video_path");
+    if (idx > 0) {
+        const [videoPathWidget] = node.widgets.splice(idx, 1);
+        node.widgets.unshift(videoPathWidget);
+    }
+}
+
+function restoreLegacyWidgetsValues(node, values) {
+    if (!Array.isArray(values) || !node.widgets) {
+        return;
+    }
+
+    let order = LEGACY_WIDGET_ORDER;
+    if (values.length > 7 && typeof values[7] === "boolean") {
+        order = [
+            "preset_prompt",
+            "custom_prompt",
+            "system_prompt",
+            "inference_mode",
+            "max_frames",
+            "max_size",
+            "seed",
+            "force_offload",
+            "save_states",
+            "video_path"
+        ];
+    }
+
+    const valMap = {};
+    for (let i = 0; i < values.length && i < order.length; i += 1) {
+        valMap[order[i]] = values[i];
+    }
+    for (const w of node.widgets) {
+        if (w && w.name in valMap) {
+            w.value = valMap[w.name];
+        }
+    }
+}
+
 function syncAllDynamicInputs(node) {
     if (!node || node.__syncingDynamicInputs) {
         return;
@@ -123,6 +180,7 @@ function syncAllDynamicInputs(node) {
     try {
         syncDynamicCategoryInputs(node, "image_", "IMAGE");
         syncDynamicCategoryInputs(node, "video_", "IMAGE");
+        reorderVideoPathWidget(node);
 
         if (typeof node.computeSize === "function" && typeof node.setSize === "function") {
             const computed = node.computeSize();
@@ -149,6 +207,7 @@ app.registerExtension({
         const onNodeCreated = nodeType.prototype.onNodeCreated;
         nodeType.prototype.onNodeCreated = function() {
             const result = onNodeCreated ? onNodeCreated.apply(this, arguments) : undefined;
+            reorderVideoPathWidget(this);
             setTimeout(() => {
                 syncAllDynamicInputs(this);
             }, 50);
@@ -169,16 +228,34 @@ app.registerExtension({
         };
 
         const onConfigure = nodeType.prototype.onConfigure;
-        nodeType.prototype.onConfigure = function() {
+        nodeType.prototype.onConfigure = function(info) {
             this._configuring = true;
+            const isLegacy = info && !info._widgets_order_v2;
+            const savedValues = isLegacy && Array.isArray(info.widgets_values) ? [...info.widgets_values] : null;
+
+            reorderVideoPathWidget(this);
             const result = onConfigure ? onConfigure.apply(this, arguments) : undefined;
+            if (isLegacy && savedValues) {
+                restoreLegacyWidgetsValues(this, savedValues);
+            }
+
             this._configuring = false;
             setTimeout(() => syncAllDynamicInputs(this), 50);
+            return result;
+        };
+
+        const onSerialize = nodeType.prototype.onSerialize;
+        nodeType.prototype.onSerialize = function(o) {
+            const result = onSerialize ? onSerialize.apply(this, arguments) : undefined;
+            if (o) {
+                o._widgets_order_v2 = true;
+            }
             return result;
         };
     },
     async nodeCreated(node) {
         if (isTargetNode(node)) {
+            reorderVideoPathWidget(node);
             setTimeout(() => syncAllDynamicInputs(node), 50);
         }
     }
