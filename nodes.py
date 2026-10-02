@@ -36,6 +36,32 @@ try:
 except Exception:
     _MTMD = False
 
+try:
+    from llama_cpp._internals import LlamaDecodeAbort
+except Exception:
+    LlamaDecodeAbort = None
+
+def reset_llama_abort_state(llm):
+    """Safely reset native llama abort flag and abort event so subsequent requests don't fail."""
+    if llm is None:
+        return
+    for target in [llm, getattr(llm, "draft_model", None), getattr(llm, "speculative", None)]:
+        if target is None:
+            continue
+        native_abort_flag = getattr(target, "_native_abort_flag", None)
+        if native_abort_flag is not None:
+            try:
+                native_abort_flag.value = False
+            except Exception:
+                pass
+        abort_event = getattr(target, "_abort_event", None)
+        if abort_event is not None and hasattr(abort_event, "clear"):
+            try:
+                abort_event.clear()
+            except Exception:
+                pass
+
+
 chat_handlers = ["None", "LLaVA-1.5", "LLaVA-1.6", "Moondream2", "nanoLLaVA", "llama3-Vision-Alpha", "MiniCPM-v2.6"]
 
 # Pre-compiled module-level Regular Expressions for performance optimization
@@ -207,6 +233,7 @@ class LLAMA_CPP_STORAGE:
     @classmethod
     def clean(cls, clear_all: bool = False):
         if cls.llm is not None:
+            reset_llama_abort_state(cls.llm)
             try:
                 cls.llm.close()
             except Exception as e:
@@ -921,12 +948,27 @@ class llama_cpp_instruct_adv:
             clean_messages.append(msg_copy)
         return clean_messages
 
+    @staticmethod
+    def reset_llama_abort_state(llm):
+        """Safely reset native llama abort flag and abort event so subsequent requests don't fail."""
+        reset_llama_abort_state(llm)
+
     def run_chat_completion_with_abort(self, messages, seed, **final_params):
         """Execute chat completion with real-time ComfyUI interruption monitoring and native Llama.abort()."""
+        if mm.processing_interrupted():
+            self.reset_llama_abort_state(LLAMA_CPP_STORAGE.llm)
+            raise mm.InterruptProcessingException()
+
+        # Always clear any lingering abort flags from a previously cancelled/interrupted execution
+        self.reset_llama_abort_state(LLAMA_CPP_STORAGE.llm)
+
+        aborted_by_watchdog = threading.Event()
         stop_monitor = threading.Event()
+
         def _abort_watchdog():
-            while not stop_monitor.wait(0.1):
+            while not stop_monitor.wait(0.05):
                 if mm.processing_interrupted():
+                    aborted_by_watchdog.set()
                     try:
                         if LLAMA_CPP_STORAGE.llm is not None and hasattr(LLAMA_CPP_STORAGE.llm, "abort"):
                             LLAMA_CPP_STORAGE.llm.abort()
@@ -938,10 +980,24 @@ class llama_cpp_instruct_adv:
         watchdog.start()
         try:
             return LLAMA_CPP_STORAGE.llm.create_chat_completion(messages=messages, seed=seed, **final_params)
+        except Exception as e:
+            err_name = type(e).__name__
+            err_str = str(e).lower()
+            if (
+                err_name == "LlamaDecodeAbort"
+                or (LlamaDecodeAbort is not None and isinstance(e, LlamaDecodeAbort))
+                or "llama_decode aborted" in err_str
+                or aborted_by_watchdog.is_set()
+                or mm.processing_interrupted()
+            ):
+                self.reset_llama_abort_state(LLAMA_CPP_STORAGE.llm)
+                raise mm.InterruptProcessingException() from e
+            raise
         finally:
             stop_monitor.set()
             watchdog.join(timeout=0.5)
-            if mm.processing_interrupted():
+            if mm.processing_interrupted() or aborted_by_watchdog.is_set():
+                self.reset_llama_abort_state(LLAMA_CPP_STORAGE.llm)
                 raise mm.InterruptProcessingException()
     
     def process(self, llama_model, preset_prompt, custom_prompt, system_prompt, inference_mode, max_frames, max_size, seed, force_offload, save_states, unique_id, parameters=None, video_path="", **kwargs):
@@ -1048,8 +1104,14 @@ class llama_cpp_instruct_adv:
                 try:
                     output = self.run_chat_completion_with_abort(messages=messages, seed=active_seed, **final_params)
                 except Exception as e:
-                    if isinstance(e, mm.InterruptProcessingException):
-                        raise e
+                    if (
+                        isinstance(e, mm.InterruptProcessingException)
+                        or type(e).__name__ == "LlamaDecodeAbort"
+                        or (LlamaDecodeAbort is not None and isinstance(e, LlamaDecodeAbort))
+                        or "llama_decode aborted" in str(e).lower()
+                    ):
+                        self.reset_llama_abort_state(LLAMA_CPP_STORAGE.llm)
+                        raise mm.InterruptProcessingException() from e
                     err_str = str(e)
                     if "context limit" in err_str.lower() or "eval_chunk_single" in err_str.lower() or "failed to find a memory slot" in err_str.lower() or "error code 1" in err_str.lower():
                         raise RuntimeError(
@@ -1107,8 +1169,14 @@ class llama_cpp_instruct_adv:
                         try:
                             output = self.run_chat_completion_with_abort(messages=frame_messages, seed=frame_seed, **final_params)
                         except Exception as e:
-                            if isinstance(e, mm.InterruptProcessingException):
-                                raise e
+                            if (
+                                isinstance(e, mm.InterruptProcessingException)
+                                or type(e).__name__ == "LlamaDecodeAbort"
+                                or (LlamaDecodeAbort is not None and isinstance(e, LlamaDecodeAbort))
+                                or "llama_decode aborted" in str(e).lower()
+                            ):
+                                self.reset_llama_abort_state(LLAMA_CPP_STORAGE.llm)
+                                raise mm.InterruptProcessingException() from e
                             err_str = str(e)
                             if "context limit" in err_str.lower() or "eval_chunk_single" in err_str.lower() or "failed to find a memory slot" in err_str.lower() or "error code 1" in err_str.lower():
                                 raise RuntimeError(
@@ -1179,8 +1247,14 @@ class llama_cpp_instruct_adv:
                     try:
                         output = self.run_chat_completion_with_abort(messages=messages, seed=active_seed, **final_params)
                     except Exception as e:
-                        if isinstance(e, mm.InterruptProcessingException):
-                            raise e
+                        if (
+                            isinstance(e, mm.InterruptProcessingException)
+                            or type(e).__name__ == "LlamaDecodeAbort"
+                            or (LlamaDecodeAbort is not None and isinstance(e, LlamaDecodeAbort))
+                            or "llama_decode aborted" in str(e).lower()
+                        ):
+                            self.reset_llama_abort_state(LLAMA_CPP_STORAGE.llm)
+                            raise mm.InterruptProcessingException() from e
                         err_str = str(e)
                         if "context limit" in err_str.lower() or "eval_chunk_single" in err_str.lower() or "failed to find a memory slot" in err_str.lower() or "error code 1" in err_str.lower():
                             raise RuntimeError(
@@ -1204,8 +1278,14 @@ class llama_cpp_instruct_adv:
                 try:
                     output = self.run_chat_completion_with_abort(messages=messages, seed=active_seed, **final_params)
                 except Exception as e:
-                    if isinstance(e, mm.InterruptProcessingException):
-                        raise e
+                    if (
+                        isinstance(e, mm.InterruptProcessingException)
+                        or type(e).__name__ == "LlamaDecodeAbort"
+                        or (LlamaDecodeAbort is not None and isinstance(e, LlamaDecodeAbort))
+                        or "llama_decode aborted" in str(e).lower()
+                    ):
+                        self.reset_llama_abort_state(LLAMA_CPP_STORAGE.llm)
+                        raise mm.InterruptProcessingException() from e
                     err_str = str(e)
                     if "context limit" in err_str.lower() or "eval_chunk_single" in err_str.lower() or "failed to find a memory slot" in err_str.lower() or "error code 1" in err_str.lower():
                         raise RuntimeError(

@@ -647,6 +647,80 @@ class TestComfyUILlamaCppVLM(unittest.TestCase):
             nodes.LLAMA_CPP_STORAGE.chat_handler = orig_handler
             nodes.LLAMA_CPP_STORAGE.current_config = orig_config
 
+    def test_reset_llama_abort_state(self):
+        import ctypes
+        import threading
+        class MockLLM:
+            def __init__(self):
+                self._native_abort_flag = ctypes.c_bool(True)
+                self._abort_event = threading.Event()
+                self._abort_event.set()
+        
+        mock_llm = MockLLM()
+        self.assertTrue(mock_llm._native_abort_flag.value)
+        self.assertTrue(mock_llm._abort_event.is_set())
+
+        nodes.reset_llama_abort_state(mock_llm)
+        self.assertFalse(mock_llm._native_abort_flag.value)
+        self.assertFalse(mock_llm._abort_event.is_set())
+
+    def test_run_chat_completion_clears_lingering_abort_flag(self):
+        import ctypes
+        import threading
+        inst = nodes.llama_cpp_instruct_adv()
+        orig_llm = nodes.LLAMA_CPP_STORAGE.llm
+
+        class MockLLM:
+            def __init__(self):
+                self._native_abort_flag = ctypes.c_bool(True)
+                self._abort_event = threading.Event()
+                self._abort_event.set()
+            def create_chat_completion(self, messages, seed=None, **kwargs):
+                # Verify that by the time create_chat_completion is entered, lingering abort is cleared
+                return {"choices": [{"message": {"content": f"flag_cleared: {not self._native_abort_flag.value}"}}]}
+
+        try:
+            mock_llm = MockLLM()
+            nodes.LLAMA_CPP_STORAGE.llm = mock_llm
+            out = inst.run_chat_completion_with_abort([{"role": "user", "content": "hi"}], seed=42)
+            self.assertEqual(out["choices"][0]["message"]["content"], "flag_cleared: True")
+            self.assertFalse(mock_llm._native_abort_flag.value)
+            self.assertFalse(mock_llm._abort_event.is_set())
+        finally:
+            nodes.LLAMA_CPP_STORAGE.llm = orig_llm
+
+    def test_run_chat_completion_converts_llama_decode_abort(self):
+        import ctypes
+        import threading
+        import comfy.model_management as mm
+        inst = nodes.llama_cpp_instruct_adv()
+        orig_llm = nodes.LLAMA_CPP_STORAGE.llm
+
+        class MockDecodeAbort(RuntimeError):
+            pass
+        MockDecodeAbort.__name__ = "LlamaDecodeAbort"
+
+        class MockLLM:
+            def __init__(self):
+                self._native_abort_flag = ctypes.c_bool(False)
+                self._abort_event = threading.Event()
+            def create_chat_completion(self, messages, seed=None, **kwargs):
+                self._native_abort_flag.value = True
+                self._abort_event.set()
+                raise MockDecodeAbort("llama_decode aborted by user callback")
+
+        try:
+            mock_llm = MockLLM()
+            nodes.LLAMA_CPP_STORAGE.llm = mock_llm
+            with self.assertRaises(mm.InterruptProcessingException):
+                inst.run_chat_completion_with_abort([{"role": "user", "content": "hi"}], seed=42)
+            # Verify abort state was reset
+            self.assertFalse(mock_llm._native_abort_flag.value)
+            self.assertFalse(mock_llm._abort_event.is_set())
+        finally:
+            nodes.LLAMA_CPP_STORAGE.llm = orig_llm
+
 if __name__ == '__main__':
     unittest.main()
+
 
